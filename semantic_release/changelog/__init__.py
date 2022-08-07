@@ -1,7 +1,7 @@
 import logging
 
 from ..helpers import LoggedFunction
-from ..settings import config, current_changelog_components
+from ..settings import current_changelog_components
 
 from .changelog import changelog_headers, changelog_table  # noqa isort:skip
 from .compare import compare_url  # noqa isort:skip
@@ -15,6 +15,10 @@ def markdown_changelog(
     repo_name: str,
     version: str,
     changelog: dict,
+    changelog_sections: str,
+    changelog_components: str,
+    hvcs: str,
+    hvcs_domain: str,
     header: bool = False,
     previous_version: str = None,
 ) -> str:
@@ -32,6 +36,7 @@ def markdown_changelog(
     """
     output = f"## v{version}\n" if header else ""
 
+    sections = changelog_sections.split(",")
     # Add the output of each component separated by a blank line
     output += "\n\n".join(
         (
@@ -43,9 +48,11 @@ def markdown_changelog(
                     version=version,
                     previous_version=previous_version,
                     changelog=changelog,
-                    changelog_sections=config.get("changelog_sections").split(","),
+                    changelog_sections=sections,
+                    hvcs=hvcs,
+                    hvcs_domain=hvcs_domain,
                 )
-                for component in current_changelog_components()
+                for component in current_changelog_components(changelog_components)
             )
             if component_output is not None
         )

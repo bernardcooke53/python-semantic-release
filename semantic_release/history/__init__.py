@@ -13,7 +13,6 @@ from dotty_dict import Dotty
 
 from ..errors import ImproperConfigurationError
 from ..helpers import LoggedFunction
-from ..settings import config
 from ..vcs_helpers import get_commit_log, get_formatted_tag, get_last_version
 from .logs import evaluate_version_bump  # noqa
 
@@ -25,29 +24,29 @@ from .parser_tag import parse_commit_message as tag_parser  # noqa isort:skip
 logger = logging.getLogger(__name__)
 
 
-def get_prerelease_pattern():
-    return f"-{config.get('prerelease_tag')}\.\d+"
+def get_prerelease_pattern(prerelease_tag: str) -> str:
+    return f"-{prerelease_tag}\.\d+"
 
 
-def get_pattern_with_commit_subject(pattern):
-    escaped_commit_subject = re.escape(config.get("commit_subject"))
+def get_pattern_with_commit_subject(pattern: str, commit_subject: str):
+    escaped_commit_subject = re.escape(commit_subject)
     return escaped_commit_subject.replace("\{version\}", pattern)
 
 
-def get_version_pattern():
-    prerelease_pattern = get_prerelease_pattern()
+def get_version_pattern(prerelease_tag: str) -> str:
+    prerelease_pattern = get_prerelease_pattern(prerelease_tag)
     return f"(\d+\.\d+\.\d+({prerelease_pattern})?)"
 
 
-def get_release_version_pattern():
-    prerelease_pattern = get_prerelease_pattern()
+def get_release_version_pattern(prerelease_tag: str) -> str:
+    prerelease_pattern = get_prerelease_pattern(prerelease_tag)
     return f"v?(\d+\.\d+\.\d+(?!.*{prerelease_pattern}))"
 
 
-def get_commit_release_version_pattern():
-    prerelease_pattern = get_prerelease_pattern()
+def get_commit_release_version_pattern(prerelease_tag: str, commit_subject: str) -> str:
+    prerelease_pattern = get_prerelease_pattern(prerelease_tag)
     return get_pattern_with_commit_subject(
-        f"v?(\d+\.\d+\.\d+(?!.*{prerelease_pattern}))"
+        f"v?(\d+\.\d+\.\d+(?!.*{prerelease_pattern}))", commit_subject
     )
 
 
@@ -65,24 +64,24 @@ class VersionDeclaration(ABC):
         return TomlVersionDeclaration(path, key)
 
     @staticmethod
-    def from_variable(config_str: str):
+    def from_variable(config_str: str, prerelease_tag: str):
         """
         Instantiate a `PatternVersionDeclaration` from a string specifying a path and a
         variable name.
         """
         path, variable = config_str.split(":", 1)
-        version_pattern = get_version_pattern()
+        version_pattern = get_version_pattern(prerelease_tag)
         pattern = rf'{variable} *[:=] *["\']{version_pattern}["\']'
         return PatternVersionDeclaration(path, pattern)
 
     @staticmethod
-    def from_pattern(config_str: str):
+    def from_pattern(config_str: str, prerelease_tag: str):
         """
         Instantiate a `PatternVersionDeclaration` from a string specifying a path and a
         regular expression matching the version number.
         """
         path, pattern = config_str.split(":", 1)
-        pattern = pattern.format(version=get_version_pattern())
+        pattern = pattern.format(version=get_version_pattern(prerelease_tag))
         return PatternVersionDeclaration(path, pattern)
 
     @abstractmethod
@@ -200,13 +199,13 @@ class PatternVersionDeclaration(VersionDeclaration):
 
 
 @LoggedFunction(logger)
-def get_current_version_by_tag() -> str:
+def get_current_version_by_tag(prerelease_tag: str) -> str:
     """
     Find the current version of the package in the current working directory using git tags.
 
     :return: A string with the version number or 0.0.0 on failure.
     """
-    version = get_last_version(pattern=get_version_pattern())
+    version = get_last_version(pattern=get_version_pattern(prerelease_tag))
     if version:
         return version
 
@@ -215,13 +214,13 @@ def get_current_version_by_tag() -> str:
 
 
 @LoggedFunction(logger)
-def get_current_release_version_by_tag() -> str:
+def get_current_release_version_by_tag(prerelease_tag: str) -> str:
     """
     Find the current version of the package in the current working directory using git tags.
 
     :return: A string with the version number or 0.0.0 on failure.
     """
-    version = get_last_version(pattern=get_release_version_pattern())
+    version = get_last_version(pattern=get_release_version_pattern(prerelease_tag))
     if version:
         return version
 
@@ -230,15 +229,25 @@ def get_current_release_version_by_tag() -> str:
 
 
 @LoggedFunction(logger)
-def get_current_version_by_config_file() -> str:
+def get_current_version_by_config_file(
+    version_variable: Optional[str],
+    version_pattern: Optional[str],
+    version_toml: Optional[str],
+    prerelease_tag: str,
+) -> str:
     """
     Get current version from the version variable defined in the configuration.
 
     :return: A string with the current version number
     :raises ImproperConfigurationError: if either no versions are found, or
-    multiple versions are found.
+    multiple versions are found.,
     """
-    declarations = load_version_declarations()
+    declarations = load_version_declarations(
+        version_variable,
+        version_pattern,
+        version_toml,
+        prerelease_tag,
+    )
     versions = set.union(*[x.parse() for x in declarations])
 
     if len(versions) == 0:
@@ -254,20 +263,33 @@ def get_current_version_by_config_file() -> str:
     return version
 
 
-def get_current_version() -> str:
+def get_current_version(
+    prerelease_tag: str,
+    version_source: str,
+    version_variable: Optional[str],
+    version_pattern: Optional[str],
+    version_toml: Optional[str],
+) -> str:
     """
     Get current version from tag or version variable, depending on configuration.
     This can be either a release or prerelease version
 
     :return: A string with the current version number
     """
-    if config.get("version_source") in ["tag", "tag_only"]:
-        return get_current_version_by_tag()
+    if version_source in ["tag", "tag_only"]:
+        return get_current_version_by_tag(prerelease_tag)
     else:
-        return get_current_version_by_config_file()
+        return get_current_version_by_config_file(
+            version_variable,
+            version_pattern,
+            version_toml,
+            prerelease_tag,
+        )
 
 
-def get_current_release_version() -> str:
+def get_current_release_version(
+    version_source: str, prerelease_tag: str, tag_format: str, commit_subject: str
+) -> str:
     """
     Get current release version from tag or commit message (no going back in config file),
     depending on configuration.
@@ -275,10 +297,12 @@ def get_current_release_version() -> str:
 
     :return: A string with the current version number
     """
-    if config.get("version_source") in ["tag", "tag_only"]:
-        return get_current_release_version_by_tag()
+    if version_source in ["tag", "tag_only"]:
+        return get_current_release_version_by_tag(prerelease_tag)
     else:
-        return get_current_release_version_by_commits()
+        return get_current_release_version_by_commits(
+            prerelease_tag, tag_format, commit_subject
+        )
 
 
 @LoggedFunction(logger)
@@ -286,6 +310,7 @@ def get_new_version(
     current_version: str,
     current_release_version: str,
     level_bump: str,
+    prerelease_tag: str,
     prerelease: bool = False,
     prerelease_patch: bool = True,
 ) -> str:
@@ -335,13 +360,13 @@ def get_new_version(
             # next version (based on commits) matches current prerelease version
             # bump prerelase
             next_prerelease_version_info = current_version_info.bump_prerelease(
-                config.get("prerelease_tag")
+                prerelease_tag
             )
         else:
             # next version (based on commits) higher than current prerelease version
             # new prerelease based on next version
             next_prerelease_version_info = next_version_info.bump_prerelease(
-                config.get("prerelease_tag")
+                prerelease_tag
             )
 
         return str(next_prerelease_version_info)
@@ -351,17 +376,19 @@ def get_new_version(
 
 
 @LoggedFunction(logger)
-def get_previous_version(version: str) -> Optional[str]:
+def get_previous_version(
+    version: str, prerelease_tag: str, tag_format: str
+) -> Optional[str]:
     """
     Return the version prior to the given version.
 
     :param version: A string with the version number.
     :return: A string with the previous version number.
     """
-    version_pattern = get_version_pattern()
+    version_pattern = get_version_pattern(prerelease_tag)
 
     found_version = False
-    for commit_hash, commit_message in get_commit_log():
+    for commit_hash, commit_message in get_commit_log(tag_format):
         logger.debug(f"Checking commit {commit_hash}")
         if version in commit_message:
             found_version = True
@@ -380,14 +407,18 @@ def get_previous_version(version: str) -> Optional[str]:
 
 
 @LoggedFunction(logger)
-def get_previous_release_version(version: str) -> Optional[str]:
+def get_previous_release_version(
+    version: str, prerelease_tag: str, commit_subject: str
+) -> Optional[str]:
     """
     Return the version prior to the given version.
 
     :param version: A string with the version number.
     :return: A string with the previous version number.
     """
-    release_version_pattern = get_commit_release_version_pattern()
+    release_version_pattern = get_commit_release_version_pattern(
+        prerelease_tag, commit_subject
+    )
 
     found_version = False
     for commit_hash, commit_message in get_commit_log():
@@ -409,15 +440,19 @@ def get_previous_release_version(version: str) -> Optional[str]:
 
 
 @LoggedFunction(logger)
-def get_current_release_version_by_commits() -> str:
+def get_current_release_version_by_commits(
+    prerelease_tag: str, tag_format: str, commit_subject: str
+) -> str:
     """
     Return the current release version (NOT prerelease) version.
 
     :return: A string with the current version number.
     """
-    release_version_re = re.compile(get_commit_release_version_pattern())
+    release_version_re = re.compile(
+        get_commit_release_version_pattern(prerelease_tag, commit_subject)
+    )
 
-    for commit_hash, commit_message in get_commit_log():
+    for commit_hash, commit_message in get_commit_log(tag_format):
         logger.debug(f"Checking commit {commit_hash}")
         match = release_version_re.match(commit_message)
         if match:
@@ -429,7 +464,13 @@ def get_current_release_version_by_commits() -> str:
 
 
 @LoggedFunction(logger)
-def set_new_version(new_version: str) -> bool:
+def set_new_version(
+    new_version: str,
+    version_variable: Optional[str] = None,
+    version_pattern: Optional[str] = None,
+    version_toml: Optional[str] = None,
+    prerelease_tag: Optional[str] = None,
+) -> bool:
     """
     Update the version number in each configured location.
 
@@ -437,13 +478,20 @@ def set_new_version(new_version: str) -> bool:
     :return: `True` if it succeeded.
     """
 
-    for declaration in load_version_declarations():
+    for declaration in load_version_declarations(
+        version_variable, version_pattern, version_toml, prerelease_tag
+    ):
         declaration.replace(new_version)
 
     return True
 
 
-def load_version_declarations() -> List[VersionDeclaration]:
+def load_version_declarations(
+    version_variable: Optional[str],
+    version_pattern: Optional[str],
+    version_toml: Optional[str],
+    prerelease_tag: str,
+) -> List[VersionDeclaration]:
     """
     Create the `VersionDeclaration` objects specified by the config file.
     """
@@ -459,13 +507,13 @@ def load_version_declarations() -> List[VersionDeclaration]:
             # necessary.
             yield from next(csv.reader([x]))
 
-    for version_var in iter_fields(config.get("version_variable")):
-        declaration = VersionDeclaration.from_variable(version_var)
+    for version_var in iter_fields(version_variable):
+        declaration = VersionDeclaration.from_variable(version_var, prerelease_tag)
         declarations.append(declaration)
-    for version_pat in iter_fields(config.get("version_pattern")):
-        declaration = VersionDeclaration.from_pattern(version_pat)
+    for version_pat in iter_fields(version_pattern):
+        declaration = VersionDeclaration.from_pattern(version_pat, prerelease_tag)
         declarations.append(declaration)
-    for version_toml in iter_fields(config.get("version_toml")):
+    for version_toml in iter_fields(version_toml):
         declaration = VersionDeclaration.from_toml(version_toml)
         declarations.append(declaration)
 

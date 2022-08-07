@@ -5,7 +5,6 @@ from typing import Optional
 
 from ..errors import UnknownCommitMessageStyleError
 from ..helpers import LoggedFunction
-from ..settings import config
 from .parser_helpers import ParsedCommit, parse_paragraphs, re_breaking
 
 logger = logging.getLogger(__name__)
@@ -16,6 +15,8 @@ re_parser = re.compile(r"(?P<subject>[^\n]+)" r"(:?\n\n(?P<text>.+))?", re.DOTAL
 @LoggedFunction(logger)
 def parse_commit_message(
     message: str,
+    minor_tag: str = ":sparkles:",
+    fix_tag: str = ":nut_and_bolt:",
 ) -> ParsedCommit:
     """
     Parse a commit message according to the 1.0 version of python-semantic-release.
@@ -38,17 +39,17 @@ def parse_commit_message(
     subject = parsed.group("subject")
 
     # Check tags for minor or patch
-    if config.get("minor_tag") in message:
+    if minor_tag in message:
         level = "feature"
         level_bump = 2
         if subject:
-            subject = subject.replace(config.get("minor_tag"), "")
+            subject = subject.replace(minor_tag, "")
 
-    elif config.get("fix_tag") in message:
+    elif fix_tag in message:
         level = "fix"
         level_bump = 1
         if subject:
-            subject = subject.replace(config.get("fix_tag"), "")
+            subject = subject.replace(fix_tag, "")
 
     else:
         # We did not find any tags in the commit message

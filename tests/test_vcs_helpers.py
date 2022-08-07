@@ -7,6 +7,7 @@ from git import GitCommandError, Repo, TagObject
 
 from semantic_release.errors import GitError, HvcsRepoParseError
 from semantic_release.history import get_release_version_pattern, get_version_pattern
+from semantic_release.settings import Config
 from semantic_release.vcs_helpers import (
     checkout,
     commit_new_version,
@@ -20,7 +21,7 @@ from semantic_release.vcs_helpers import (
     update_changelog_file,
 )
 
-from . import mock, wrapped_config_get
+from . import mock
 
 
 @pytest.fixture
@@ -28,8 +29,8 @@ def mock_git(mocker):
     return mocker.patch("semantic_release.vcs_helpers._repo.git")
 
 
-def test_first_commit_is_not_initial_commit():
-    assert next(get_commit_log()) != "Initial commit"
+def test_first_commit_is_not_initial_commit(default_config):
+    assert next(get_commit_log(default_config.tag_format)) != "Initial commit"
 
 
 @pytest.mark.parametrize(
@@ -38,7 +39,7 @@ def test_first_commit_is_not_initial_commit():
         # Basic usage:
         dict(
             version="1.0.0",
-            config=dict(
+            config=Config(
                 version_variable="path:---",
             ),
             add_paths=[
@@ -52,7 +53,7 @@ def test_first_commit_is_not_initial_commit():
         # With author:
         dict(
             version="1.0.0",
-            config=dict(
+            config=Config(
                 version_variable="path:---",
                 commit_author="Alice <alice@example.com>",
             ),
@@ -67,7 +68,7 @@ def test_first_commit_is_not_initial_commit():
         # With multiple version paths:
         dict(
             version="1.0.0",
-            config=dict(
+            config=Config(
                 version_variable=[
                     "path1:---",
                     "path2:---",
@@ -84,13 +85,19 @@ def test_first_commit_is_not_initial_commit():
         ),
     ],
 )
-def test_add_and_commit(mock_git, mocker, params):
-    mocker.patch(
-        "semantic_release.vcs_helpers.config.get",
-        wrapped_config_get(**params["config"]),
-    )
+def test_add_and_commit(mock_git, params):
+    config = params["config"]
 
-    commit_new_version(params["version"])
+    commit_new_version(
+        params["version"],
+        config.version_variable,
+        config.version_pattern,
+        config.version_toml,
+        config.prerelease_tag,
+        config.commit_subject,
+        config.commit_message,
+        config.commit_author,
+    )
 
     for path in params["add_paths"]:
         mock_git.add.assert_any_call(path)
@@ -98,17 +105,21 @@ def test_add_and_commit(mock_git, mocker, params):
     mock_git.commit.assert_called_once_with(**params["commit_args"])
 
 
-def test_tag_new_version(mock_git, mocker):
-    mocker.patch(
-        "semantic_release.vcs_helpers.config.get",
-        return_value="ver{version}",
-    )
-    tag_new_version("1.0.0")
+def test_tag_new_version(mock_git):
+    tag_new_version("ver{version}", "1.0.0")
     mock_git.tag.assert_called_with("-a", "ver1.0.0", m="ver1.0.0")
 
 
 def test_push_new_version(mock_git):
-    push_new_version()
+    push_new_version(
+        hvcs="github",
+        ignore_token_for_push=True,
+        auth_token=None,
+        owner="foo",
+        name="repo",
+        branch="master",
+        domain="github.com",
+    )
     mock_git.push.assert_has_calls(
         [
             mock.call("origin", "master"),
@@ -118,7 +129,15 @@ def test_push_new_version(mock_git):
 
 
 def test_push_new_version_with_custom_branch(mock_git):
-    push_new_version(branch="release")
+    push_new_version(
+        hvcs="github",
+        ignore_token_for_push=True,
+        auth_token=None,
+        owner="foo",
+        name="repo",
+        branch="release",
+        domain="github.com",
+    )
     mock_git.push.assert_has_calls(
         [
             mock.call("origin", "release"),
@@ -136,7 +155,13 @@ def test_push_using_token(mock_git, mocker, actor):
     name = "name"
     branch = "main"
     push_new_version(
-        auth_token=token, domain=domain, owner=owner, name=name, branch=branch
+        hvcs="github",
+        ignore_token_for_push=False,
+        auth_token=token,
+        domain=domain,
+        owner=owner,
+        name=name,
+        branch=branch,
     )
     server = (
         f"https://{actor + ':' if actor else ''}{token}@{domain}/{owner}/{name}.git"
@@ -149,18 +174,20 @@ def test_push_using_token(mock_git, mocker, actor):
     )
 
 
-def test_push_ignoring_token(mock_git, mocker):
-    mocker.patch(
-        "semantic_release.vcs_helpers.config.get",
-        wrapped_config_get(**{"ignore_token_for_push": True}),
-    )
+def test_push_ignoring_token(mock_git):
     token = "auth--token"
     domain = "domain"
     owner = "owner"
     name = "name"
     branch = "main"
     push_new_version(
-        auth_token=token, domain=domain, owner=owner, name=name, branch=branch
+        hvcs="github",
+        ignore_token_for_push=True,
+        auth_token=token,
+        domain=domain,
+        owner=owner,
+        name=name,
+        branch=branch,
     )
     server = "origin"
     mock_git.push.assert_has_calls(
@@ -327,7 +354,7 @@ def test_get_current_head_hash(mocker):
     assert get_current_head_hash() == "commit-hash"
 
 
-def test_push_should_not_print_auth_token(mock_git, mocker):
+def test_push_should_not_print_auth_token(mock_git):
     mock_git.configure_mock(
         **{
             "push.side_effect": GitCommandError(
@@ -335,12 +362,16 @@ def test_push_should_not_print_auth_token(mock_git, mocker):
             )
         }
     )
-    mocker.patch(
-        "semantic_release.vcs_helpers.config.get",
-        wrapped_config_get(**{"hvcs": "gitlab"}),
-    )
     with pytest.raises(GitError) as excinfo:
-        push_new_version(auth_token="auth--token")
+        push_new_version(
+            hvcs="gitlab",
+            ignore_token_for_push=False,
+            auth_token="auth--token",
+            owner="foo",
+            name="repo",
+            branch="master",
+            domain="github.com",
+        )
     assert "auth--token" not in str(excinfo)
 
 
@@ -435,7 +466,9 @@ def test_get_last_version_with_real_pattern(get_pattern, skip_tags, expected_res
             FakeTag("v1.0.0", "bbbbbbbbbbbbbbbbbbbb", 2, False),
         ]
     )
-    assert expected_result == get_last_version(get_pattern(), skip_tags)
+    assert expected_result == get_last_version(
+        get_pattern(prerelease_tag="beta"), skip_tags
+    )
 
 
 def test_update_changelog_file_ok(mock_git, mocker):
@@ -455,7 +488,12 @@ def test_update_changelog_file_ok(mock_git, mocker):
     mocked_write_text = mocker.patch("semantic_release.vcs_helpers.Path.write_text")
 
     content_to_add_str = "### Fix\n* Fix a bug\n### Feature\n* Add something awesome"
-    update_changelog_file("2.0.0", content_to_add_str)
+    update_changelog_file(
+        "2.0.0",
+        content_to_add_str,
+        changelog_file="CHANGELOG.md",
+        changelog_placeholder="<!--next-version-placeholder-->",
+    )
 
     mock_git.add.assert_called_once_with("CHANGELOG.md")
     mocked_read_text.assert_called()
@@ -482,7 +520,12 @@ def test_update_changelog_file_missing_file(mock_git, mocker):
     mocked_read_text = mocker.patch("semantic_release.vcs_helpers.Path.read_text")
     mocked_write_text = mocker.patch("semantic_release.vcs_helpers.Path.write_text")
 
-    update_changelog_file("2.0.0", "* Some new content")
+    update_changelog_file(
+        "2.0.0",
+        "* Some new content",
+        changelog_file="CHANGELOG.md",
+        changelog_placeholder="<!--next-version-placeholder-->",
+    )
 
     mock_git.add.assert_called_once_with("CHANGELOG.md")
     mocked_read_text.assert_not_called()
@@ -505,7 +548,12 @@ def test_update_changelog_file_missing_placeholder_but_containing_header(
     )
     mocked_write_text = mocker.patch("semantic_release.vcs_helpers.Path.write_text")
 
-    update_changelog_file("2.0.0", "* Some new content")
+    update_changelog_file(
+        "2.0.0",
+        "* Some new content",
+        changelog_file="CHANGELOG.md",
+        changelog_placeholder="<!--next-version-placeholder-->",
+    )
 
     mock_git.add.assert_called_once_with("CHANGELOG.md")
     mocked_write_text.assert_called_once_with(
@@ -523,7 +571,12 @@ def test_update_changelog_empty_file(mock_git, mocker):
     mocker.patch("semantic_release.vcs_helpers.Path.read_text", return_value="")
     mocked_write_text = mocker.patch("semantic_release.vcs_helpers.Path.write_text")
 
-    update_changelog_file("2.0.0", "* Some new content")
+    update_changelog_file(
+        "2.0.0",
+        "* Some new content",
+        changelog_file="CHANGELOG.md",
+        changelog_placeholder="<!--next-version-placeholder-->",
+    )
 
     mock_git.add.assert_called_once_with("CHANGELOG.md")
     mocked_write_text.assert_called_once_with(
@@ -543,7 +596,12 @@ def test_update_changelog_file_missing_placeholder(mock_git, mocker):
     )
     mocked_write_text = mocker.patch("semantic_release.vcs_helpers.Path.write_text")
 
-    update_changelog_file("2.0.0", "* Some new content")
+    update_changelog_file(
+        "2.0.0",
+        "* Some new content",
+        changelog_file="CHANGELOG.md",
+        changelog_placeholder="<!--next-version-placeholder-->",
+    )
 
     mock_git.add.assert_not_called()
     mocked_read_text.assert_called()
@@ -569,12 +627,8 @@ def test_update_additional_files_with_no_changes(
     Since we have no file changes, we expect `add` to never be called,
     regardless of the config.
     """
-    mocker.patch(
-        "semantic_release.vcs_helpers.config.get",
-        wrapped_config_get(**{"include_additional_files": include_additional_files}),
-    )
     mocker.patch("semantic_release.vcs_helpers.get_changed_files", return_value=[])
-    update_additional_files()
+    update_additional_files(include_additional_files)
     mock_git.add.assert_not_called()
 
 
@@ -583,14 +637,10 @@ def test_update_additional_files_single_changed_file(mock_git, mocker):
     We expect to add the single file corresponding to config & changes.
     """
     mocker.patch(
-        "semantic_release.vcs_helpers.config.get",
-        wrapped_config_get(**{"include_additional_files": "somefile.txt"}),
-    )
-    mocker.patch(
         "semantic_release.vcs_helpers.get_changed_files",
         return_value=["somefile.txt"],
     )
-    update_additional_files()
+    update_additional_files("somefile.txt")
     mock_git.add.assert_called_once_with("somefile.txt")
 
 
@@ -600,14 +650,10 @@ def test_update_additional_files_one_in_config_two_changes(mock_git, mocker):
     expect that single file to be added.
     """
     mocker.patch(
-        "semantic_release.vcs_helpers.config.get",
-        wrapped_config_get(**{"include_additional_files": "anotherfile.txt"}),
-    )
-    mocker.patch(
         "semantic_release.vcs_helpers.get_changed_files",
         return_value=["somefile.txt", "anotherfile.txt"],
     )
-    update_additional_files()
+    update_additional_files("anotherfile.txt")
     mock_git.add.assert_called_once_with("anotherfile.txt")
 
 
@@ -617,14 +663,8 @@ def test_update_additional_files_two_in_config_one_change(mock_git, mocker):
     expect that single file to be added.
     """
     mocker.patch(
-        "semantic_release.vcs_helpers.config.get",
-        wrapped_config_get(
-            **{"include_additional_files": "somefile.txt,anotherfile.txt"}
-        ),
-    )
-    mocker.patch(
         "semantic_release.vcs_helpers.get_changed_files",
         return_value=["anotherfile.txt"],
     )
-    update_additional_files()
+    update_additional_files("somefile.txt,anotherfile.txt")
     mock_git.add.assert_called_once_with("anotherfile.txt")

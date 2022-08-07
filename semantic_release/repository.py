@@ -15,20 +15,8 @@ from twine.settings import Settings as TwineSettings
 
 from semantic_release import ImproperConfigurationError
 from semantic_release.helpers import LoggedFunction
-from semantic_release.settings import config
 
 logger = logging.getLogger(__name__)
-
-
-def get_env_var(name: str) -> Optional[str]:
-    """
-    Resolve variable name from config and return matching environment variable
-
-    :param name: Variable name to retrieve from environment
-
-    :returns Value of environment variable or None if not set.
-    """
-    return os.environ.get(config.get(name))
 
 
 @dataclass(eq=False)
@@ -42,16 +30,20 @@ class ArtifactRepo:
     dist_path: InitVar[Path]
     repository_name: str = "pypi"
     repository_url: Optional[str] = None
+    repository_url_var: Optional[str] = "REPOSITORY_URL"
     username: Optional[str] = field(repr=False, default=None)
     password: Optional[str] = field(repr=False, default=None)
     dists: List[str] = field(init=False, default_factory=list)
+    dist_glob_patterns: str = "*"
 
     def __post_init__(self, dist_path: Path) -> None:
         """
         :param dist_path: Path to dist folder containing the files to upload.
         """
         self._handle_credentials_init()
-        self._handle_repository_config()
+        self._handle_repository_config(
+            self.repository_url_var, self.repository_url, self.repository_name
+        )
         self._handle_glob_patterns(dist_path)
 
     @LoggedFunction(logger)
@@ -65,18 +57,19 @@ class ArtifactRepo:
         :raises ImproperConfigurationError:
             Error while setting up credentials configuration.
         """
-        username = get_env_var("repository_user_var") or get_env_var("pypi_user_var")
-        password = (
-            get_env_var("repository_pass_var")
-            or get_env_var("pypi_pass_var")
-            or get_env_var("pypi_token_var")
-        )
-        if username and password:
-            self.username = username
-            self.password = password
-        elif password and not username:
-            self.username = username or "__token__"
-            self.password = password
+        # TODO: ensure username and password are set properly elsewhere
+        # username = os.getenv(repository_user_var) or os.getenv(pypi_user_var)
+        # password = (
+        #     os.getenv(repository_pass_var)
+        #     or os.getenv(pypi_pass_var)
+        #     or os.getenv(pypi_token_var)
+        # )
+        if self.username and self.password:
+            self.username = self.username
+            self.password = self.password
+        elif self.password and not self.username:
+            self.username = self.username or "__token__"
+            self.password = self.password
             logger.warning(
                 "Providing only password or token without username is deprecated"
             )
@@ -93,15 +86,17 @@ class ArtifactRepo:
 
         :param dist_path: Path to folder with package files
         """
-        glob_patterns = config.get("dist_glob_patterns") or config.get(
-            "upload_to_pypi_glob_patterns"
-        )
-        glob_patterns = (glob_patterns or "*").split(",")
+        glob_patterns = self.dist_glob_patterns.split(",")
 
         self.dists = [str(dist_path.joinpath(pattern)) for pattern in glob_patterns]
 
     @LoggedFunction(logger)
-    def _handle_repository_config(self) -> None:
+    def _handle_repository_config(
+        self,
+        repository_url_var: Optional[str],
+        repository_url: Optional[str],
+        repository: Optional[str],
+    ) -> None:
         """
         Initialize repository settings from config.
 
@@ -109,15 +104,10 @@ class ArtifactRepo:
 
         Defaults to repository_name `pypi` when both are not set.
         """
-        repository_url = get_env_var("repository_url_var") or config.get(
-            "repository_url"
-        )
-        repository_name = config.get("repository")
-
-        if repository_url:
-            self.repository_url = repository_url
-        elif repository_name:
-            self.repository_name = repository_name
+        if not repository_url and repository_url_var:
+            self.repository_url = os.getenv(repository_url_var)
+        elif repository:
+            self.repository_name = repository
 
     @LoggedFunction(logger)
     def _create_twine_settings(self, addon_kwargs: Dict[str, Any]) -> TwineSettings:
@@ -172,10 +162,10 @@ class ArtifactRepo:
             return True
 
     @staticmethod
-    def upload_enabled() -> bool:
+    def upload_enabled(upload_to_repository: bool, upload_to_pypi: bool) -> bool:
         """
         Check if artifact repository upload is enabled
 
         :returns True if upload is enabled, False otherwise.
         """
-        return config.get("upload_to_repository") and config.get("upload_to_pypi")
+        return upload_to_repository and upload_to_pypi

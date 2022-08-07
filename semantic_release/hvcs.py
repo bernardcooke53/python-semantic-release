@@ -13,7 +13,6 @@ from urllib3 import Retry
 
 from .errors import ImproperConfigurationError
 from .helpers import LoggedFunction, build_requests_session
-from .settings import config
 from .vcs_helpers import get_formatted_tag
 
 logger = logging.getLogger(__name__)
@@ -24,29 +23,52 @@ mimetypes.add_type("application/octet-stream", ".whl")
 
 class Base(object):
     @staticmethod
-    def domain() -> str:
+    def domain(hvcs_domain: str) -> str:
         raise NotImplementedError
 
     @staticmethod
-    def api_url() -> str:
+    def api_url(hvcs_domain: str, hvcs_api_domain: Optional[str] = None) -> str:
         raise NotImplementedError
 
     @staticmethod
-    def token() -> Optional[str]:
+    def token(token_var: str) -> Optional[str]:
         raise NotImplementedError
 
     @staticmethod
-    def check_build_status(owner: str, repo: str, ref: str) -> bool:
-        raise NotImplementedError
-
-    @classmethod
-    def post_release_changelog(
-        cls, owner: str, repo: str, version: str, changelog: str
+    def check_build_status(
+        owner: str,
+        repo: str,
+        ref: str,
+        token_var: str,
+        hvcs_domain: Optional[str] = None,
+        hvcs_api_domain: Optional[str] = None,
     ) -> bool:
         raise NotImplementedError
 
     @classmethod
-    def upload_dists(cls, owner: str, repo: str, version: str, path: str) -> bool:
+    def post_release_changelog(
+        cls,
+        owner: str,
+        repo: str,
+        version: str,
+        changelog: str,
+        token_var: str,
+        hvcs_domain: Optional[str] = None,
+        hvcs_api_domain: Optional[str] = None,
+    ) -> bool:
+        raise NotImplementedError
+
+    @classmethod
+    def upload_dists(
+        cls,
+        owner: str,
+        repo: str,
+        version: str,
+        path: str,
+        token_var: str,
+        hvcs_domain: Optional[str] = None,
+        hvcs_api_domain: Optional[str] = None,
+    ) -> bool:
         # Skip on unsupported HVCS instead of raising error
         return True
 
@@ -96,21 +118,23 @@ class Github(Base):
     _fix_mime_types()
 
     @staticmethod
-    def domain() -> str:
+    def domain(hvcs_domain: Optional[str] = None) -> str:
         """Github domain property
 
         :return: The Github domain
         """
         # ref: https://docs.github.com/en/actions/reference/environment-variables#default-environment-variables
-        hvcs_domain = config.get(
-            "hvcs_domain", os.getenv("GITHUB_SERVER_URL", "").replace("https://", "")
+        hvcs_domain = hvcs_domain or os.getenv("GITHUB_SERVER_URL", "").replace(
+            "https://", ""
         )
 
         domain = hvcs_domain if hvcs_domain else Github.DEFAULT_DOMAIN
         return domain
 
     @staticmethod
-    def api_url() -> str:
+    def api_url(
+        hvcs_domain: Optional[str] = None, hvcs_api_domain: Optional[str] = None
+    ) -> str:
         """Github api_url property
 
         :return: The Github API URL
@@ -118,8 +142,8 @@ class Github(Base):
         # not necessarily prefixed with api in the case of a custom domain, so
         # can't just default DEFAULT_DOMAIN to github.com
         # ref: https://docs.github.com/en/actions/reference/environment-variables#default-environment-variables
-        hvcs_api_domain = config.get(
-            "hvcs_api_domain", os.getenv("GITHUB_API_URL", "").replace("https://", "")
+        hvcs_api_domain = hvcs_api_domain or os.getenv("GITHUB_API_URL", "").replace(
+            "https://", ""
         )
         hostname = (
             hvcs_api_domain if hvcs_api_domain else "api." + Github.DEFAULT_DOMAIN
@@ -127,35 +151,42 @@ class Github(Base):
         return f"https://{hostname}"
 
     @staticmethod
-    def token() -> Optional[str]:
+    def token(token_var: str) -> Optional[str]:
         """Github token property
 
         :return: The Github token environment variable (GH_TOKEN) value
         """
-        return os.environ.get(config.get("github_token_var"))
+        return os.environ.get(token_var)
 
     @staticmethod
-    def auth() -> Optional[TokenAuth]:
+    def auth(token_var: str) -> Optional[TokenAuth]:
         """Github token property
 
         :return: The Github token environment variable (GH_TOKEN) value
         """
-        token = Github.token()
+        token = Github.token(token_var)
         if not token:
             return None
         return TokenAuth(token)
 
     @staticmethod
     def session(
-        raise_for_status=True, retry: Union[Retry, bool, int] = True
+        token_var: str, raise_for_status=True, retry: Union[Retry, bool, int] = True
     ) -> Session:
         session = build_requests_session(raise_for_status=raise_for_status, retry=retry)
-        session.auth = Github.auth()
+        session.auth = Github.auth(token_var)
         return session
 
     @staticmethod
     @LoggedFunction(logger)
-    def check_build_status(owner: str, repo: str, ref: str) -> bool:
+    def check_build_status(
+        owner: str,
+        repo: str,
+        ref: str,
+        token_var: str,
+        hvcs_domain: Optional[str] = None,
+        hvcs_api_domain: Optional[str] = None,
+    ) -> bool:
         """Check build status
 
         https://docs.github.com/rest/reference/repos#get-the-combined-status-for-a-specific-reference
@@ -168,8 +199,13 @@ class Github(Base):
         """
         url = "{domain}/repos/{owner}/{repo}/commits/{ref}/status"
         try:
-            response = Github.session().get(
-                url.format(domain=Github.api_url(), owner=owner, repo=repo, ref=ref)
+            response = Github.session(token_var).get(
+                url.format(
+                    domain=Github.api_url(hvcs_api_domain),
+                    owner=owner,
+                    repo=repo,
+                    ref=ref,
+                )
             )
             return response.json().get("state") == "success"
         except HTTPError as e:
@@ -178,7 +214,16 @@ class Github(Base):
 
     @classmethod
     @LoggedFunction(logger)
-    def create_release(cls, owner: str, repo: str, tag: str, changelog: str) -> bool:
+    def create_release(
+        cls,
+        owner: str,
+        repo: str,
+        tag: str,
+        changelog: str,
+        token_var: str,
+        hvcs_domain: Optional[str] = None,
+        hvcs_api_domain: Optional[str] = None,
+    ) -> bool:
         """Create a new release
 
         https://docs.github.com/rest/reference/repos#create-a-release
@@ -191,8 +236,8 @@ class Github(Base):
         :return: Whether the request succeeded
         """
         try:
-            Github.session().post(
-                f"{Github.api_url()}/repos/{owner}/{repo}/releases",
+            Github.session(token_var).post(
+                f"{Github.api_url(hvcs_api_domain)}/repos/{owner}/{repo}/releases",
                 json={
                     "tag_name": tag,
                     "name": tag,
@@ -208,7 +253,15 @@ class Github(Base):
 
     @classmethod
     @LoggedFunction(logger)
-    def get_release(cls, owner: str, repo: str, tag: str) -> Optional[int]:
+    def get_release(
+        cls,
+        owner: str,
+        repo: str,
+        tag: str,
+        token_var: str,
+        hvcs_domain: Optional[str] = None,
+        hvcs_api_domain: Optional[str] = None,
+    ) -> Optional[int]:
         """Get a release by its tag name
 
         https://docs.github.com/rest/reference/repos#get-a-release-by-tag-name
@@ -220,8 +273,8 @@ class Github(Base):
         :return: ID of found release
         """
         try:
-            response = Github.session().get(
-                f"{Github.api_url()}/repos/{owner}/{repo}/releases/tags/{tag}"
+            response = Github.session(token_var).get(
+                f"{Github.api_url(hvcs_api_domain)}/repos/{owner}/{repo}/releases/tags/{tag}"
             )
             return response.json().get("id")
         except HTTPError as e:
@@ -231,7 +284,16 @@ class Github(Base):
 
     @classmethod
     @LoggedFunction(logger)
-    def edit_release(cls, owner: str, repo: str, id: int, changelog: str) -> bool:
+    def edit_release(
+        cls,
+        owner: str,
+        repo: str,
+        id: int,
+        changelog: str,
+        token_var: str,
+        hvcs_domain: Optional[str] = None,
+        hvcs_api_domain: Optional[str] = None,
+    ) -> bool:
         """Edit a release with updated change notes
 
         https://docs.github.com/rest/reference/repos#update-a-release
@@ -244,8 +306,8 @@ class Github(Base):
         :return: Whether the request succeeded
         """
         try:
-            Github.session().post(
-                f"{Github.api_url()}/repos/{owner}/{repo}/releases/{id}",
+            Github.session(token_var).post(
+                f"{Github.api_url(hvcs_api_domain)}/repos/{owner}/{repo}/releases/{id}",
                 json={"body": changelog},
             )
             return True
@@ -256,7 +318,15 @@ class Github(Base):
     @classmethod
     @LoggedFunction(logger)
     def post_release_changelog(
-        cls, owner: str, repo: str, version: str, changelog: str
+        cls,
+        owner: str,
+        repo: str,
+        tag_format: str,
+        version: str,
+        changelog: str,
+        token_var: str,
+        hvcs_domain: Optional[str] = None,
+        hvcs_api_domain: Optional[str] = None,
     ) -> bool:
         """Post release changelog
 
@@ -267,16 +337,27 @@ class Github(Base):
 
         :return: The status of the request
         """
-        tag = get_formatted_tag(version)
+        tag = get_formatted_tag(tag_format, version)
         logger.debug(f"Attempting to create release for {tag}")
-        success = Github.create_release(owner, repo, tag, changelog)
+        success = Github.create_release(
+            owner, repo, tag, changelog, token_var, hvcs_api_domain=hvcs_api_domain
+        )
 
         if not success:
             logger.debug("Unsuccessful, looking for an existing release to update")
-            release_id = Github.get_release(owner, repo, tag)
+            release_id = Github.get_release(
+                owner, repo, tag, token_var, hvcs_api_domain=hvcs_api_domain
+            )
             if release_id:
                 logger.debug(f"Updating release {release_id}")
-                success = Github.edit_release(owner, repo, release_id, changelog)
+                success = Github.edit_release(
+                    owner,
+                    repo,
+                    release_id,
+                    changelog,
+                    token_var,
+                    hvcs_api_domain=hvcs_api_domain,
+                )
             else:
                 logger.debug(f"Existing release not found")
 
@@ -285,7 +366,13 @@ class Github(Base):
     @classmethod
     @LoggedFunction(logger)
     def get_asset_upload_url(
-        cls, owner: str, repo: str, release_id: str
+        cls,
+        owner: str,
+        repo: str,
+        release_id: str,
+        token_var: str,
+        hvcs_domain: Optional[str] = None,
+        hvcs_api_domain: Optional[str] = None,
     ) -> Optional[str]:
         """Get the correct upload url for a release
 
@@ -298,8 +385,8 @@ class Github(Base):
         :return: URL found to upload for a release
         """
         try:
-            response = Github.session().get(
-                f"{Github.api_url()}/repos/{owner}/{repo}/releases/{release_id}"
+            response = Github.session(token_var).get(
+                f"{Github.api_url(hvcs_api_domain)}/repos/{owner}/{repo}/releases/{release_id}"
             )
             return str(response.json().get("upload_url")).split("{")[0]
         except HTTPError as e:
@@ -310,7 +397,15 @@ class Github(Base):
     @classmethod
     @LoggedFunction(logger)
     def upload_asset(
-        cls, owner: str, repo: str, release_id: int, file: str, label: str = None
+        cls,
+        owner: str,
+        repo: str,
+        release_id: int,
+        file: str,
+        token_var: str,
+        hvcs_domain: Optional[str] = None,
+        hvcs_api_domain: Optional[str] = None,
+        label: str = None,
     ) -> bool:
         """Upload an asset to an existing release
 
@@ -324,7 +419,7 @@ class Github(Base):
 
         :return: The status of the request
         """
-        url = cls.get_asset_upload_url(owner, repo, release_id)
+        url = cls.get_asset_upload_url(owner, repo, release_id, token_var)
         if not url:
             logger.warning("Could not get release upload url")
             return False
@@ -334,7 +429,7 @@ class Github(Base):
             content_type = "application/octet-stream"
 
         try:
-            response = Github.session().post(
+            response = Github.session(token_var).post(
                 url,
                 params={"name": os.path.basename(file), "label": label},
                 headers={
@@ -353,7 +448,17 @@ class Github(Base):
             return False
 
     @classmethod
-    def upload_dists(cls, owner: str, repo: str, version: str, path: str) -> bool:
+    def upload_dists(
+        cls,
+        owner: str,
+        repo: str,
+        tag_format: str,
+        version: str,
+        path: str,
+        token_var: str,
+        hvcs_domain: Optional[str] = None,
+        hvcs_api_domain: Optional[str] = None,
+    ) -> bool:
         """Upload distributions to a release
 
         :param owner: The owner namespace of the repository
@@ -365,7 +470,13 @@ class Github(Base):
         """
 
         # Find the release corresponding to this version
-        release_id = Github.get_release(owner, repo, get_formatted_tag(version))
+        release_id = Github.get_release(
+            owner,
+            repo,
+            get_formatted_tag(tag_format, version),
+            token_var,
+            hvcs_api_domain,
+        )
         if not release_id:
             logger.debug("No release found to upload assets to")
             return False
@@ -375,7 +486,15 @@ class Github(Base):
         for file in os.listdir(path):
             file_path = os.path.join(path, file)
 
-            if not Github.upload_asset(owner, repo, release_id, file_path):
+            if not Github.upload_asset(
+                owner,
+                repo,
+                release_id,
+                file_path,
+                token_var,
+                hvcs_domain=hvcs_domain,
+                hvcs_api_domain=hvcs_api_domain,
+            ):
                 one_or_more_failed = True
 
         return not one_or_more_failed
@@ -390,30 +509,32 @@ class Gitea(Base):
     _fix_mime_types()
 
     @staticmethod
-    def domain() -> str:
+    def domain(hvcs_domain: Optional[str] = None) -> str:
         """Gitea domain property
 
         :return: The Gitea domain
         """
         # ref: https://docs.gitea.com/en/actions/reference/environment-variables#default-environment-variables
-        hvcs_domain = config.get(
-            "hvcs_domain", os.getenv("GITEA_SERVER_URL", "").replace("https://", "")
+        hvcs_domain = hvcs_domain or os.getenv("GITEA_SERVER_URL", "").replace(
+            "https://", ""
         )
         domain = hvcs_domain if hvcs_domain else Gitea.DEFAULT_DOMAIN
         return domain
 
     @staticmethod
-    def api_url() -> str:
+    def api_url(
+        hvcs_domain: Optional[str] = None, hvcs_api_domain: Optional[str] = None
+    ) -> str:
         """Gitea api_url property
 
         :return: The Gitea API URL
         """
 
-        hvcs_domain = config.get(
-            "hvcs_domain", os.getenv("GITEA_SERVER_URL", "").replace("https://", "")
+        hvcs_domain = hvcs_domain or os.getenv("GITEA_SERVER_URL", "").replace(
+            "https://", ""
         )
-        hostname = config.get(
-            "hvcs_api_domain", os.getenv("GITEA_API_URL", "").replace("https://", "")
+        hostname = hvcs_api_domain or os.getenv("GITEA_API_URL", "").replace(
+            "https://", ""
         )
 
         if hvcs_domain and not hostname:
@@ -424,35 +545,42 @@ class Gitea(Base):
         return f"https://{hostname}"
 
     @staticmethod
-    def token() -> Optional[str]:
+    def token(token_var: str) -> Optional[str]:
         """Gitea token property
 
         :return: The Gitea token environment variable (GITEA_TOKEN) value
         """
-        return os.environ.get(config.get("gitea_token_var"))
+        return os.environ.get(token_var)
 
     @staticmethod
-    def auth() -> Optional[TokenAuth]:
+    def auth(token_var: str) -> Optional[TokenAuth]:
         """Gitea token property
 
         :return: The Gitea token environment variable (GITEA_TOKEN) value
         """
-        token = Gitea.token()
+        token = Gitea.token(token_var)
         if not token:
             return None
         return TokenAuth(token)
 
     @staticmethod
     def session(
-        raise_for_status=True, retry: Union[Retry, bool, int] = True
+        token_var: str, raise_for_status=True, retry: Union[Retry, bool, int] = True
     ) -> Session:
         session = build_requests_session(raise_for_status=raise_for_status, retry=retry)
-        session.auth = Gitea.auth()
+        session.auth = Gitea.auth(token_var)
         return session
 
     @staticmethod
     @LoggedFunction(logger)
-    def check_build_status(owner: str, repo: str, ref: str) -> bool:
+    def check_build_status(
+        owner: str,
+        repo: str,
+        ref: str,
+        token_var: str,
+        hvcs_domain: Optional[str] = None,
+        hvcs_api_domain: Optional[str] = None,
+    ) -> bool:
         """Check build status
 
         https://gitea.com/api/swagger#/repository/repoCreateStatus
@@ -465,8 +593,13 @@ class Gitea(Base):
         """
         url = "{domain}/repos/{owner}/{repo}/statuses/{ref}"
         try:
-            response = Gitea.session().get(
-                url.format(domain=Gitea.api_url(), owner=owner, repo=repo, ref=ref)
+            response = Gitea.session(token_var).get(
+                url.format(
+                    domain=Gitea.api_url(hvcs_domain, hvcs_api_domain),
+                    owner=owner,
+                    repo=repo,
+                    ref=ref,
+                )
             )
             data = response.json()
             if type(data) == list:
@@ -479,7 +612,16 @@ class Gitea(Base):
 
     @classmethod
     @LoggedFunction(logger)
-    def create_release(cls, owner: str, repo: str, tag: str, changelog: str) -> bool:
+    def create_release(
+        cls,
+        owner: str,
+        repo: str,
+        tag: str,
+        changelog: str,
+        token_var: str,
+        hvcs_domain: Optional[str] = None,
+        hvcs_api_domain: Optional[str] = None,
+    ) -> bool:
         """Create a new release
 
         https://gitea.com/api/swagger#/repository/repoCreateRelease
@@ -492,8 +634,8 @@ class Gitea(Base):
         :return: Whether the request succeeded
         """
         try:
-            Gitea.session().post(
-                f"{Gitea.api_url()}/repos/{owner}/{repo}/releases",
+            Gitea.session(token_var).post(
+                f"{Gitea.api_url(hvcs_domain, hvcs_api_domain)}/repos/{owner}/{repo}/releases",
                 json={
                     "tag_name": tag,
                     "name": tag,
@@ -509,7 +651,15 @@ class Gitea(Base):
 
     @classmethod
     @LoggedFunction(logger)
-    def get_release(cls, owner: str, repo: str, tag: str) -> Optional[int]:
+    def get_release(
+        cls,
+        owner: str,
+        repo: str,
+        tag: str,
+        token_var: str,
+        hvcs_domain: Optional[str] = None,
+        hvcs_api_domain: Optional[str] = None,
+    ) -> Optional[int]:
         """Get a release by its tag name
 
         https://gitea.com/api/swagger#/repository/repoGetReleaseByTag
@@ -521,8 +671,8 @@ class Gitea(Base):
         :return: ID of found release
         """
         try:
-            response = Gitea.session().get(
-                f"{Gitea.api_url()}/repos/{owner}/{repo}/releases/tags/{tag}"
+            response = Gitea.session(token_var).get(
+                f"{Gitea.api_url(hvcs_domain, hvcs_api_domain)}/repos/{owner}/{repo}/releases/tags/{tag}"
             )
             return response.json().get("id")
         except HTTPError as e:
@@ -532,7 +682,16 @@ class Gitea(Base):
 
     @classmethod
     @LoggedFunction(logger)
-    def edit_release(cls, owner: str, repo: str, id: int, changelog: str) -> bool:
+    def edit_release(
+        cls,
+        owner: str,
+        repo: str,
+        id: int,
+        changelog: str,
+        token_var: str,
+        hvcs_domain: Optional[str] = None,
+        hvcs_api_domain: Optional[str] = None,
+    ) -> bool:
         """Edit a release with updated change notes
 
         https://gitea.com/api/swagger#/repository/repoEditRelease
@@ -545,8 +704,8 @@ class Gitea(Base):
         :return: Whether the request succeeded
         """
         try:
-            Gitea.session().post(
-                f"{Gitea.api_url()}/repos/{owner}/{repo}/releases/{id}",
+            Gitea.session(token_var).post(
+                f"{Gitea.api_url(hvcs_domain, hvcs_api_domain)}/repos/{owner}/{repo}/releases/{id}",
                 json={"body": changelog},
             )
             return True
@@ -557,7 +716,15 @@ class Gitea(Base):
     @classmethod
     @LoggedFunction(logger)
     def post_release_changelog(
-        cls, owner: str, repo: str, version: str, changelog: str
+        cls,
+        owner: str,
+        repo: str,
+        tag_format: str,
+        version: str,
+        changelog: str,
+        token_var: str,
+        hvcs_domain: Optional[str] = None,
+        hvcs_api_domain: Optional[str] = None,
     ) -> bool:
         """Post release changelog
 
@@ -568,16 +735,18 @@ class Gitea(Base):
 
         :return: The status of the request
         """
-        tag = get_formatted_tag(version)
+        tag = get_formatted_tag(tag_format, version)
         logger.debug(f"Attempting to create release for {tag}")
-        success = Gitea.create_release(owner, repo, tag, changelog)
+        success = Gitea.create_release(owner, repo, tag, changelog, token_var)
 
         if not success:
             logger.debug("Unsuccessful, looking for an existing release to update")
-            release_id = Gitea.get_release(owner, repo, tag)
+            release_id = Gitea.get_release(owner, repo, tag, token_var)
             if release_id:
                 logger.debug(f"Updating release {release_id}")
-                success = Gitea.edit_release(owner, repo, release_id, changelog)
+                success = Gitea.edit_release(
+                    owner, repo, release_id, changelog, token_var
+                )
             else:
                 logger.debug(f"Existing release not found")
 
@@ -586,7 +755,15 @@ class Gitea(Base):
     @classmethod
     @LoggedFunction(logger)
     def upload_asset(
-        cls, owner: str, repo: str, release_id: int, file: str, label: str = None
+        cls,
+        owner: str,
+        repo: str,
+        release_id: int,
+        file: str,
+        token_var: str,
+        hvcs_domain: Optional[str] = None,
+        hvcs_api_domain: Optional[str] = None,
+        label: str = None,
     ) -> bool:
         """Upload an asset to an existing release
 
@@ -600,10 +777,10 @@ class Gitea(Base):
 
         :return: The status of the request
         """
-        url = f"{Gitea.api_url()}/repos/{owner}/{repo}/releases/{release_id}/assets"
+        url = f"{Gitea.api_url(hvcs_domain, hvcs_api_domain)}/repos/{owner}/{repo}/releases/{release_id}/assets"
         try:
             name = os.path.basename(file)
-            response = Gitea.session().post(
+            response = Gitea.session(token_var).post(
                 url,
                 params={"name": name},
                 data={},
@@ -626,7 +803,17 @@ class Gitea(Base):
             return False
 
     @classmethod
-    def upload_dists(cls, owner: str, repo: str, version: str, path: str) -> bool:
+    def upload_dists(
+        cls,
+        owner: str,
+        repo: str,
+        tag_format: str,
+        version: str,
+        path: str,
+        token_var: str,
+        hvcs_domain: Optional[str] = None,
+        hvcs_api_domain: Optional[str] = None,
+    ) -> bool:
         """Upload distributions to a release
 
         :param owner: The owner namespace of the repository
@@ -638,7 +825,14 @@ class Gitea(Base):
         """
 
         # Find the release corresponding to this version
-        release_id = Gitea.get_release(owner, repo, get_formatted_tag(version))
+        release_id = Gitea.get_release(
+            owner,
+            repo,
+            get_formatted_tag(tag_format, version),
+            token_var,
+            hvcs_domain=hvcs_domain,
+            hvcs_api_domain=hvcs_api_domain,
+        )
         if not release_id:
             logger.debug("No release found to upload assets to")
             return False
@@ -648,7 +842,15 @@ class Gitea(Base):
         for file in os.listdir(path):
             file_path = os.path.join(path, file)
 
-            if not Gitea.upload_asset(owner, repo, release_id, file_path):
+            if not Gitea.upload_asset(
+                owner,
+                repo,
+                release_id,
+                file_path,
+                token_var,
+                hvcs_domain=hvcs_domain,
+                hvcs_api_domain=hvcs_api_domain,
+            ):
                 one_or_more_failed = True
 
         return not one_or_more_failed
@@ -658,7 +860,7 @@ class Gitlab(Base):
     """Gitlab helper class"""
 
     @staticmethod
-    def domain() -> str:
+    def domain(hvcs_domain: Optional[str]) -> str:
         """Gitlab domain property
 
         :return: The Gitlab instance domain
@@ -668,11 +870,11 @@ class Gitlab(Base):
             url = urlsplit(os.environ["CI_SERVER_URL"])
             return f"{url.netloc}{url.path}".rstrip("/")
 
-        domain = config.get("hvcs_domain", os.environ.get("CI_SERVER_HOST", None))
+        domain = hvcs_domain or os.environ.get("CI_SERVER_HOST", None)
         return domain if domain else "gitlab.com"
 
     @staticmethod
-    def api_url() -> str:
+    def api_url(hvcs_domain: str, hvcs_api_domain: str = None) -> str:
         """Gitlab api_url property
 
         :return: The Gitlab instance API url
@@ -681,19 +883,26 @@ class Gitlab(Base):
         if "CI_SERVER_URL" in os.environ:
             return os.environ["CI_SERVER_URL"]
 
-        return f"https://{Gitlab.domain()}"
+        return f"https://{Gitlab.domain(hvcs_domain)}"
 
     @staticmethod
-    def token() -> Optional[str]:
+    def token(token_var: str) -> Optional[str]:
         """Gitlab token property
 
         :return: The Gitlab token environment variable (GL_TOKEN) value
         """
-        return os.environ.get(config.get("gitlab_token_var"))
+        return os.environ.get(token_var)
 
     @staticmethod
     @LoggedFunction(logger)
-    def check_build_status(owner: str, repo: str, ref: str) -> bool:
+    def check_build_status(
+        owner: str,
+        repo: str,
+        ref: str,
+        token_var: str,
+        hvcs_domain: Optional[str] = None,
+        hvcs_api_domain: Optional[str] = None,
+    ) -> bool:
         """Check last build status
 
         :param owner: The owner namespace of the repository. It includes all groups and subgroups.
@@ -702,8 +911,10 @@ class Gitlab(Base):
 
         :return: the status of the pipeline (False if a job failed)
         """
-        gl = gitlab.Gitlab(Gitlab.api_url(), private_token=Gitlab.token())
-        gl.auth()
+        gl = gitlab.Gitlab(
+            Gitlab.api_url(hvcs_domain), private_token=Gitlab.token(token_var)
+        )
+        gl.auth(token_var)
         jobs = gl.projects.get(owner + "/" + repo).commits.get(ref).statuses.list()
         for job in jobs:
             if job["status"] not in ["success", "skipped"]:  # type: ignore[index]
@@ -720,7 +931,15 @@ class Gitlab(Base):
     @classmethod
     @LoggedFunction(logger)
     def post_release_changelog(
-        cls, owner: str, repo: str, version: str, changelog: str
+        cls,
+        owner: str,
+        repo: str,
+        tag_format: str,
+        version: str,
+        changelog: str,
+        token_var: str,
+        hvcs_domain: Optional[str] = None,
+        hvcs_api_domain: Optional[str] = None,
     ) -> bool:
         """Post release changelog
 
@@ -731,9 +950,11 @@ class Gitlab(Base):
 
         :return: The status of the request
         """
-        ref = get_formatted_tag(version)
-        gl = gitlab.Gitlab(Gitlab.api_url(), private_token=Gitlab.token())
-        gl.auth()
+        ref = get_formatted_tag(tag_format, version)
+        gl = gitlab.Gitlab(
+            Gitlab.api_url(hvcs_domain), private_token=Gitlab.token(token_var)
+        )
+        gl.auth(token_var)
         try:
             logger.debug(f"Before release create call")
             gl.projects.get(owner + "/" + repo).releases.create(
@@ -753,12 +974,11 @@ class Gitlab(Base):
 
 
 @LoggedFunction(logger)
-def get_hvcs() -> Base:
+def get_hvcs(hvcs: str) -> Base:
     """Get HVCS helper class
 
     :raises ImproperConfigurationError: if the hvcs option provided is not valid
     """
-    hvcs = config.get("hvcs")
     try:
         return globals()[hvcs.capitalize()]
     except KeyError:
@@ -769,7 +989,15 @@ def get_hvcs() -> Base:
         )
 
 
-def check_build_status(owner: str, repository: str, ref: str) -> bool:
+def check_build_status(
+    hvcs: str,
+    owner: str,
+    repository: str,
+    ref: str,
+    token_var: str,
+    hvcs_domain: Optional[str] = None,
+    hvcs_api_domain: Optional[str] = None,
+) -> bool:
     """
     Checks the build status of a commit on the api from your hosted version control provider.
 
@@ -779,10 +1007,27 @@ def check_build_status(owner: str, repository: str, ref: str) -> bool:
     :return: A boolean with the build status
     """
     logger.debug(f"Checking build status for {owner}/{repository}#{ref}")
-    return get_hvcs().check_build_status(owner, repository, ref)
+    return get_hvcs(hvcs).check_build_status(
+        owner,
+        repository,
+        ref,
+        token_var,
+        hvcs_domain=hvcs_domain,
+        hvcs_api_domain=hvcs_api_domain,
+    )
 
 
-def post_changelog(owner: str, repository: str, version: str, changelog: str) -> bool:
+def post_changelog(
+    hvcs: str,
+    owner: str,
+    repository: str,
+    tag_format: str,
+    version: str,
+    changelog: str,
+    token_var: str,
+    hvcs_domain: Optional[str] = None,
+    hvcs_api_domain: Optional[str] = None,
+) -> bool:
     """
     Posts the changelog to the current hvcs release API
 
@@ -793,10 +1038,28 @@ def post_changelog(owner: str, repository: str, version: str, changelog: str) ->
     :return: a tuple with success status and payload from hvcs
     """
     logger.debug(f"Posting release changelog for {owner}/{repository} {version}")
-    return get_hvcs().post_release_changelog(owner, repository, version, changelog)
+    return get_hvcs(hvcs).post_release_changelog(
+        owner,
+        repository,
+        tag_format,
+        version,
+        changelog,
+        token_var,
+        hvcs_domain=hvcs_domain,
+        hvcs_api_domain=hvcs_api_domain,
+    )
 
 
-def upload_to_release(owner: str, repository: str, version: str, path: str) -> bool:
+def upload_to_release(
+    hvcs: str,
+    owner: str,
+    repository: str,
+    tag_format: str,
+    version: str,
+    path: str,
+    token_var: str,
+    hvcs_api_domain: str,
+) -> bool:
     """
     Upload distributions to the current hvcs release API
 
@@ -808,31 +1071,33 @@ def upload_to_release(owner: str, repository: str, version: str, path: str) -> b
     :return: Status of the request
     """
 
-    return get_hvcs().upload_dists(owner, repository, version, path)
+    return get_hvcs(hvcs).upload_dists(
+        owner, repository, tag_format, version, path, token_var, hvcs_api_domain
+    )
 
 
-def get_token() -> Optional[str]:
+def get_token(hvcs: str, token_var: str) -> Optional[str]:
     """
     Returns the token for the current VCS
 
     :return: The token in string form
     """
-    return get_hvcs().token()
+    return get_hvcs(hvcs).token(token_var)
 
 
-def get_domain() -> Optional[str]:
+def get_domain(hvcs: str, hvcs_domain: str) -> Optional[str]:
     """
     Returns the domain for the current VCS
 
     :return: The domain in string form
     """
-    return get_hvcs().domain()
+    return get_hvcs(hvcs).domain(hvcs_domain)
 
 
-def check_token() -> bool:
+def check_token(hvcs: str, token_var: str) -> bool:
     """
     Checks whether there exists a token or not.
 
     :return: A boolean telling if there is a token.
     """
-    return get_hvcs().token() is not None
+    return get_hvcs(hvcs).token(token_var) is not None

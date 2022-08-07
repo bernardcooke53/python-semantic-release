@@ -14,8 +14,10 @@ from git.objects import TagObject
 
 from .errors import GitError, HvcsRepoParseError
 from .helpers import LoggedFunction
-from .settings import config
 
+# TODO: if it's not a valid Git repo then nothing else works, right?
+#       It looks like this just delays the GitError to the call site
+#       of a downstream function - maybe that's not desirable
 _repo: Optional[Repo]
 try:
     _repo = Repo(".", search_parent_directories=True)
@@ -31,17 +33,16 @@ def repo():
     return _repo
 
 
-def get_formatted_tag(version):
+def get_formatted_tag(tag_format: str, version: str) -> str:
     """Get the version, formatted with `tag_format` config option"""
-    tag_format = config.get("tag_format")
     return tag_format.format(version=version)
 
 
-def get_commit_log(from_rev=None):
+def get_commit_log(tag_format: str, from_rev=None):
     """Yield all commit messages from last to first."""
     rev = None
     if from_rev:
-        from_rev = get_formatted_tag(from_rev)
+        from_rev = get_formatted_tag(tag_format, from_rev)
         try:
             repo().commit(from_rev)
             rev = f"...{from_rev}"
@@ -55,7 +56,7 @@ def get_commit_log(from_rev=None):
 
 
 @LoggedFunction(logger)
-def get_last_version(pattern, skip_tags=None) -> Optional[str]:
+def get_last_version(pattern: str, skip_tags=None) -> Optional[str]:
     """
     Find the latest version using repo tags.
 
@@ -101,7 +102,7 @@ def get_repository_owner_and_name() -> Tuple[str, str]:
     # Select the owner and name as regex groups
     parts = re.search(r"[:/]([^:]+)/([^/]*?)(.git)?$", split_url.path)
     if not parts:
-        raise HvcsRepoParseError
+        raise HvcsRepoParseError()
 
     return parts.group(1), parts.group(2)
 
@@ -116,7 +117,16 @@ def get_current_head_hash() -> str:
 
 
 @LoggedFunction(logger)
-def commit_new_version(version: str):
+def commit_new_version(
+    version: str,
+    version_variable: Optional[str],
+    version_pattern: Optional[str],
+    version_toml: Optional[str],
+    prerelease_tag: str,
+    commit_subject: Optional[str],
+    commit_message: Optional[str],
+    commit_author: Optional[str] = None,
+):
     """
     Commit the file containing the version number variable.
 
@@ -126,21 +136,18 @@ def commit_new_version(version: str):
     """
     from .history import load_version_declarations
 
-    commit_subject = config.get("commit_subject")
     message = commit_subject.format(version=version)
 
     # Add an extended message if one is configured
-    commit_message = config.get("commit_message")
     if commit_message:
         message += "\n\n"
         message += commit_message.format(version=version)
 
-    commit_author = config.get(
-        "commit_author",
-        "semantic-release <semantic-release>",
-    )
+    commit_author = commit_author or "semantic-release <semantic-release>"
 
-    for declaration in load_version_declarations():
+    for declaration in load_version_declarations(
+        version_variable, version_pattern, version_toml, prerelease_tag
+    ):
         git_path: PurePath = PurePath(os.getcwd(), declaration.path).relative_to(repo().working_dir)  # type: ignore
         repo().git.add(str(git_path))
 
@@ -148,15 +155,15 @@ def commit_new_version(version: str):
 
 
 @LoggedFunction(logger)
-def update_changelog_file(version: str, content_to_add: str):
+def update_changelog_file(
+    version: str, content_to_add: str, changelog_file: str, changelog_placeholder: str
+):
     """
     Update changelog file with changelog for the release.
 
     :param version: The release version number, as a string.
     :param content_to_add: The release notes for the version.
     """
-    changelog_file = config.get("changelog_file")
-    changelog_placeholder = config.get("changelog_placeholder")
     git_path = Path(os.getcwd(), changelog_file)
     if not git_path.exists() or git_path.read_text().strip() == "":
         original_content = f"# Changelog\n\n{changelog_placeholder}\n"
@@ -206,13 +213,12 @@ def get_changed_files(repo: Repo) -> List[str]:
 
 
 @LoggedFunction(logger)
-def update_additional_files():
+def update_additional_files(include_additional_files: str):
     """
     Add specified files to VCS, if they've changed.
     """
     changed_files = get_changed_files(repo())
 
-    include_additional_files = config.get("include_additional_files")
     if include_additional_files:
         for filename in include_additional_files.split(","):
             if filename in changed_files:
@@ -223,18 +229,20 @@ def update_additional_files():
 
 
 @LoggedFunction(logger)
-def tag_new_version(version: str):
+def tag_new_version(tag_format: str, version: str):
     """
     Create a new tag with the version number, prefixed with v by default.
 
     :param version: The version number used in the tag as a string.
     """
-    tag = get_formatted_tag(version)
+    tag = get_formatted_tag(tag_format, version)
     return repo().git.tag("-a", tag, m=tag)
 
 
 @LoggedFunction(logger)
 def push_new_version(
+    hvcs: str,
+    ignore_token_for_push: bool,
     auth_token: str = None,
     owner: str = None,
     name: str = None,
@@ -253,9 +261,9 @@ def push_new_version(
     """
     server = "origin"
     if auth_token:
-        if not config.get("ignore_token_for_push"):
+        if not ignore_token_for_push:
             token = auth_token
-            if config.get("hvcs") == "gitlab":
+            if hvcs == "gitlab":
                 token = "gitlab-ci-token:" + token
             actor = os.environ.get("GITHUB_ACTOR")
             if actor:

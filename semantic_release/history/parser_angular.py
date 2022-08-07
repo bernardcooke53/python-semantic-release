@@ -8,7 +8,6 @@ import re
 
 from ..errors import ImproperConfigurationError, UnknownCommitMessageStyleError
 from ..helpers import LoggedFunction
-from ..settings import config
 from .parser_helpers import ParsedCommit, parse_paragraphs, re_breaking
 
 logger = logging.getLogger(__name__)
@@ -25,7 +24,13 @@ LEVEL_BUMPS = {"no-release": 0, "patch": 1, "minor": 2, "major": 3}
 
 
 @LoggedFunction(logger)
-def parse_commit_message(message: str) -> ParsedCommit:
+def parse_commit_message(
+    message: str,
+    parser_angular_allowed_types: str = "build,chore,ci,docs,feat,fix,perf,style,refactor,test",
+    parser_angular_minor_types: str = "feat",
+    parser_angular_patch_types: str = "fix,perf",
+    parser_angular_default_level_bump: str = "no-release",
+) -> ParsedCommit:
     """
     Parse a commit message according to the angular commit guidelines specification.
 
@@ -35,9 +40,9 @@ def parse_commit_message(message: str) -> ParsedCommit:
     """
 
     # loading these are here to make it easier to mock in tests
-    allowed_types = config.get("parser_angular_allowed_types").split(",")
-    minor_types = config.get("parser_angular_minor_types").split(",")
-    patch_types = config.get("parser_angular_patch_types").split(",")
+    allowed_types = parser_angular_allowed_types.split(",")
+    minor_types = parser_angular_minor_types.split(",")
+    patch_types = parser_angular_patch_types.split(",")
     re_parser = re.compile(
         r"(?P<type>" + "|".join(allowed_types) + ")"
         r"(?:\((?P<scope>[^\n]+)\))?"
@@ -73,7 +78,7 @@ def parse_commit_message(message: str) -> ParsedCommit:
         if match
     ]
 
-    default_level_bump = config.get("parser_angular_default_level_bump").lower()
+    default_level_bump = parser_angular_default_level_bump.lower()
     if default_level_bump not in LEVEL_BUMPS.keys():
         raise ImproperConfigurationError(
             f"{default_level_bump} is not a valid option for "

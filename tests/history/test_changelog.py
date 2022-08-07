@@ -2,9 +2,24 @@ import mock
 import pytest
 
 from semantic_release.history.logs import generate_changelog
+from semantic_release.history import angular_parser
 
-from .. import wrapped_config_get
 from . import *
+
+
+# TODO: fix this so they work
+from semantic_release.settings import Config
+
+
+config = Config()
+commit_parser = lambda message: angular_parser(
+    message,
+    config.parser_angular_allowed_types,
+    config.parser_angular_minor_types,
+    config.parser_angular_patch_types,
+    config.parser_angular_default_level_bump,
+)
+#
 
 
 def test_should_generate_necessary_sections():
@@ -12,7 +27,7 @@ def test_should_generate_necessary_sections():
         "semantic_release.history.logs.get_commit_log",
         lambda *a, **k: ALL_KINDS_OF_COMMIT_MESSAGES + [MAJOR2, UNKNOWN_STYLE],
     ):
-        changelog = generate_changelog("0.0.0")
+        changelog = generate_changelog(commit_parser, from_version="0.0.0")
         assert len(changelog["feature"]) > 0
         assert len(changelog["fix"]) > 0
         assert len(changelog["breaking"]) > 0
@@ -24,7 +39,7 @@ def test_should_include_hash_in_section_contents():
         "semantic_release.history.logs.get_commit_log",
         lambda *a, **k: ALL_KINDS_OF_COMMIT_MESSAGES,
     ):
-        changelog = generate_changelog("0.0.0")
+        changelog = generate_changelog(commit_parser, "0.0.0")
         assert changelog["breaking"][0][0] == MAJOR[0]
         assert changelog["feature"][0][0] == MINOR[0]
         assert changelog["fix"][0][0] == PATCH[0]
@@ -35,7 +50,7 @@ def test_should_only_read_until_given_version():
         "semantic_release.history.logs.get_commit_log",
         lambda *a, **k: MAJOR_LAST_RELEASE_MINOR_AFTER,
     ):
-        changelog = generate_changelog("1.1.0")
+        changelog = generate_changelog(commit_parser, "1.1.0")
         assert len(changelog["breaking"]) == 0
         assert len(changelog["feature"]) > 0
         assert "fix" not in changelog
@@ -60,7 +75,7 @@ def test_should_get_right_breaking_description(commit, expected_description):
         "semantic_release.history.logs.get_commit_log",
         lambda *a, **kw: [commit],
     ):
-        changelog = generate_changelog("0.0.0")
+        changelog = generate_changelog(commit_parser, "0.0.0")
         assert changelog["breaking"][0][1] == expected_description
 
 
@@ -69,7 +84,7 @@ def test_should_get_multiple_breaking_descriptions():
         "semantic_release.history.logs.get_commit_log",
         lambda *a, **kw: [MAJOR_MULTIPLE_FOOTERS],
     ):
-        changelog = generate_changelog("0.0.0")
+        changelog = generate_changelog(commit_parser, "0.0.0")
         assert len(changelog["breaking"]) == 2
         assert changelog["breaking"][0][1] == "Breaking change 1"
         assert changelog["breaking"][1][1] == "Breaking change 2"
@@ -88,7 +103,7 @@ def test_scope_is_included_in_changelog(commit, commit_type, expected):
         "semantic_release.history.logs.get_commit_log",
         lambda *a, **kw: [commit],
     ):
-        changelog = generate_changelog("0.0.0")
+        changelog = generate_changelog(commit_parser, "0.0.0")
         assert changelog[commit_type][0][1] == expected
 
 
@@ -97,13 +112,10 @@ def test_scope_is_included_in_changelog(commit, commit_type, expected):
     lambda *a, **k: [("24", "fix: Fix another bug")],
 )
 def test_scope_is_omitted_with_empty_scope():
-    changelog = generate_changelog("0.0.0")
+    changelog = generate_changelog(commit_parser, "0.0.0")
     assert changelog["fix"][0][1] == "Fix another bug"
 
 
-@mock.patch(
-    "semantic_release.history.config.get", wrapped_config_get(changelog_scope=False)
-)
 @pytest.mark.parametrize(
     "commit,commit_type",
     [
@@ -117,7 +129,7 @@ def test_scope_included_in_changelog_configurable(commit, commit_type):
         "semantic_release.history.logs.get_commit_log",
         lambda *a, **kw: [commit],
     ):
-        changelog = generate_changelog("0.0.0")
+        changelog = generate_changelog(commit_parser, "0.0.0", changelog_scope=False)
         assert "**x:**" not in changelog[commit_type][0][1]
 
 
@@ -142,9 +154,7 @@ def test_message_capitalization_is_configurable(
         lambda *a, **kw: [commit],
     ):
 
-        with mock.patch(
-            "semantic_release.history.config.get",
-            wrapped_config_get(changelog_capitalize=config_setting),
-        ):
-            changelog = generate_changelog("0.0.0")
-            assert changelog["fix"][0][1] == expected_description
+        changelog = generate_changelog(
+            commit_parser, "0.0.0", changelog_capitalize=config_setting
+        )
+        assert changelog["fix"][0][1] == expected_description

@@ -1,11 +1,10 @@
 """Logs
 """
 import logging
-from typing import Optional
+from typing import Optional, Callable, Any
 
 from ..errors import UnknownCommitMessageStyleError
 from ..helpers import LoggedFunction
-from ..settings import config, current_commit_parser
 from ..vcs_helpers import get_commit_log
 
 logger = logging.getLogger(__name__)
@@ -19,7 +18,14 @@ LEVELS = {
 
 
 @LoggedFunction(logger)
-def evaluate_version_bump(current_version: str, force: str = None) -> Optional[str]:
+def evaluate_version_bump(
+    commit_parser: Callable[[str], str],
+    current_version: str,
+    tag_format: str,
+    patch_without_tag: bool = False,
+    major_on_zero: bool = True,
+    force: str = None,
+) -> Optional[str]:
     """
     Read git log since the last release to decide if we should make a major, minor or patch release.
 
@@ -36,7 +42,7 @@ def evaluate_version_bump(current_version: str, force: str = None) -> Optional[s
     changes = []
     commit_count = 0
 
-    for _hash, commit_message in get_commit_log(current_version):
+    for _hash, commit_message in get_commit_log(tag_format, current_version):
         if commit_message.startswith(current_version):
             # Stop once we reach the current version
             # (we are looping in the order of newest -> oldest)
@@ -49,7 +55,7 @@ def evaluate_version_bump(current_version: str, force: str = None) -> Optional[s
 
         # Attempt to parse this commit using the currently-configured parser
         try:
-            message = current_commit_parser()(commit_message)
+            message = commit_parser(commit_message)
             changes.append(message.bump)
         except UnknownCommitMessageStyleError as err:
             logger.debug(f"Ignoring UnknownCommitMessageStyleError: {err}")
@@ -65,15 +71,11 @@ def evaluate_version_bump(current_version: str, force: str = None) -> Optional[s
         else:
             logger.warning(f"Unknown bump level {level}")
 
-    if config.get("patch_without_tag") and commit_count > 0 and bump is None:
+    if patch_without_tag and commit_count > 0 and bump is None:
         bump = "patch"
         logger.debug(f"Changing bump level to patch based on config patch_without_tag")
 
-    if (
-        not config.get("major_on_zero")
-        and current_version.startswith("0.")
-        and bump == "major"
-    ):
+    if not major_on_zero and current_version.startswith("0.") and bump == "major":
         bump = "minor"
         logger.debug("Changing bump level to minor based on config major_on_zero")
 
@@ -81,7 +83,13 @@ def evaluate_version_bump(current_version: str, force: str = None) -> Optional[s
 
 
 @LoggedFunction(logger)
-def generate_changelog(from_version: str, to_version: str = None) -> dict:
+def generate_changelog(
+    commit_parser: Callable[[str], Any],
+    from_version: str,
+    to_version: str = None,
+    changelog_capitalize: bool = True,
+    changelog_scope: bool = True,
+) -> dict:
     """
     Parse a changelog dictionary for the given version.
 
@@ -116,7 +124,7 @@ def generate_changelog(from_version: str, to_version: str = None) -> dict:
             break
 
         try:
-            message = current_commit_parser()(commit_message)
+            message = commit_parser(commit_message)
             if message.type not in changes:
                 logger.debug(f"Creating new changelog section for {message.type} ")
                 changes[message.type] = list()
@@ -126,14 +134,14 @@ def generate_changelog(from_version: str, to_version: str = None) -> dict:
             formatted_message = (
                 message.descriptions[0][0].upper() + message.descriptions[0][1:]
             )
-            if config.get("changelog_capitalize") is False:
+            if not changelog_capitalize:
                 formatted_message = message.descriptions[0]
 
             # By default, feat(x): description shows up in changelog with the
             # scope bolded, like:
             #
             # * **x**: description
-            if config.get("changelog_scope") and message.scope:
+            if changelog_scope and message.scope:
                 formatted_message = f"**{message.scope}:** {formatted_message}"
 
             changes[message.type].append((_hash, formatted_message))

@@ -4,7 +4,6 @@ import re
 from typing import Optional
 
 from ..helpers import LoggedFunction
-from ..settings import config
 from .parser_helpers import ParsedCommit, parse_paragraphs
 
 logger = logging.getLogger(__name__)
@@ -13,6 +12,9 @@ logger = logging.getLogger(__name__)
 @LoggedFunction(logger)
 def parse_commit_message(
     message: str,
+    major_emoji: str = ":boom:",
+    minor_emoji: str = ":sparkles:,:children_crossing:,:lipstick:,:iphone:,:egg:,:chart_with_upwards_trend:",
+    patch_emoji: str = ":ambulance:,:lock:,:bug:,:zap:,:goal_net:,:alien:,:wheelchair:,:speech_balloon:,:mag:,:apple:,:penguin:,:checkered_flag:,:robot:,:green_apple:",
 ) -> ParsedCommit:
     """
     Parse a commit using an emoji in the subject line.
@@ -34,9 +36,9 @@ def parse_commit_message(
 
     subject = message.split("\n")[0]
 
-    major = config.get("major_emoji").split(",")
-    minor = config.get("minor_emoji").split(",")
-    patch = config.get("patch_emoji").split(",")
+    major = major_emoji.split(",")
+    minor = minor_emoji.split(",")
+    patch = patch_emoji.split(",")
     all_emojis = major + minor + patch
 
     # Loop over emojis from most important to least important
