@@ -43,7 +43,6 @@ from typing import Tuple
 from git import Commit
 
 from semantic_release.enums import LevelBump
-from semantic_release.errors import UnknownCommitMessageStyleError
 from semantic_release.commit_parser.token import ParsedCommit, ParseResult, ParseError
 from semantic_release.commit_parser._base import CommitParser, ParserOptions
 
@@ -115,6 +114,7 @@ class ScipyCommitParser(CommitParser[ParseResult[ParsedCommit, ParseError]]):
     with descriptions)
     :raises UnknownCommitMessageStyleError: if regular expression matching fails
     """
+
     parser_options = ScipyParserOptions
 
     def __init__(self, options: ScipyParserOptions) -> None:
@@ -134,7 +134,7 @@ class ScipyCommitParser(CommitParser[ParseResult[ParsedCommit, ParseError]]):
         parsed = self.re_parser.match(message)
 
         if not parsed:
-            raise UnknownCommitMessageStyleError(
+            return ParseError(commit,
                 f"Unable to parse the given commit message: {message}"
             )
 
@@ -155,7 +155,9 @@ class ScipyCommitParser(CommitParser[ParseResult[ParsedCommit, ParseError]]):
         for tag in self.options.allowed_tags:
             if tag == parsed.group("tag"):
                 section = tag_to_section.get(tag, "None")
-                level_bump = self.options.tag_to_level.get(tag, self.options.default_level_bump)
+                level_bump = self.options.tag_to_level.get(
+                    tag, self.options.default_level_bump
+                )
                 break
         else:
             # some commits may not have a tag, e.g. if they belong to a PR that
@@ -175,5 +177,5 @@ class ScipyCommitParser(CommitParser[ParseResult[ParsedCommit, ParseError]]):
             scope=parsed.group("scope"),
             descriptions=blocks,
             breaking_descriptions=migration_instructions,
-            commit=commit
+            commit=commit,
         )
