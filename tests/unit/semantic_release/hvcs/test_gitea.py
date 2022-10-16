@@ -1,9 +1,9 @@
 import base64
 import mimetypes
-import re
 import os
-from urllib.parse import urlencode
+import re
 from unittest import mock
+from urllib.parse import urlencode
 
 import pytest
 import requests_mock
@@ -194,13 +194,7 @@ def test_gitea_get_repository_owner_and_name(default_gitea_client):
         ),
     ],
 )
-def test_remote_url(
-    default_gitea_client,
-    use_token,
-    token,
-    _remote_url,
-    expected
-):
+def test_remote_url(default_gitea_client, use_token, token, _remote_url, expected):
     default_gitea_client._remote_url = _remote_url
     default_gitea_client.token = token
     assert default_gitea_client.remote_url(use_token=use_token) == expected
@@ -299,7 +293,9 @@ def test_create_release(default_gitea_client, status_code, prerelease, expected)
         m.register_uri(
             "POST", gitea_api_matcher, json={"status": "ok"}, status_code=status_code
         )
-        assert default_gitea_client.create_release(tag, changelog, prerelease) == expected
+        assert (
+            default_gitea_client.create_release(tag, changelog, prerelease) == expected
+        )
         assert m.called
         assert len(m.request_history) == 1
         assert m.last_request.method == "POST"
@@ -320,9 +316,7 @@ def test_create_release(default_gitea_client, status_code, prerelease, expected)
         }
 
 
-@pytest.mark.parametrize(
-    "token", (None, "super-token")
-)
+@pytest.mark.parametrize("token", (None, "super-token"))
 def test_should_create_release_using_token_or_netrc(default_gitea_client, token):
     default_gitea_client.token = token
     default_gitea_client.session.auth = None if not token else TokenAuth(token)
@@ -345,7 +339,9 @@ def test_should_create_release_using_token_or_netrc(default_gitea_client, token)
                 "Authorization": "Basic "
                 + base64.encodebytes(
                     f"{netrc.login_username}:{netrc.login_password}".encode()
-                ).decode("ascii").strip()
+                )
+                .decode("ascii")
+                .strip()
             }.items() <= m.last_request.headers.items()
         else:
             assert {
@@ -396,7 +392,9 @@ def test_request_has_no_auth_header_if_no_token_or_netrc():
         ({}, 404, None),
     ],
 )
-def test_get_release_id_by_tag(default_gitea_client, resp_payload, status_code, expected):
+def test_get_release_id_by_tag(
+    default_gitea_client, resp_payload, status_code, expected
+):
     tag = "v1.0.0"
     with requests_mock.Mocker(session=default_gitea_client.session) as m:
         m.register_uri(
@@ -501,7 +499,9 @@ def test_create_or_update_release(
         (503, False),
     ],
 )
-def test_upload_asset(default_gitea_client, example_changelog_md, status_code, expected):
+def test_upload_asset(
+    default_gitea_client, example_changelog_md, status_code, expected
+):
     release_id = 420
     urlparams = {"name": example_changelog_md.name}
     with requests_mock.Mocker(session=default_gitea_client.session) as m:
@@ -510,7 +510,9 @@ def test_upload_asset(default_gitea_client, example_changelog_md, status_code, e
         )
         assert (
             default_gitea_client.upload_asset(
-                release_id=release_id, file=example_changelog_md.resolve(), label="doesn't matter could be None"
+                release_id=release_id,
+                file=example_changelog_md.resolve(),
+                label="doesn't matter could be None",
             )
             == expected
         )

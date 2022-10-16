@@ -1,9 +1,9 @@
 import base64
 import mimetypes
-import re
 import os
-from urllib.parse import urlencode
+import re
 from unittest import mock
+from urllib.parse import urlencode
 
 import pytest
 import requests_mock
@@ -358,9 +358,7 @@ def test_create_release(default_gh_client, status_code, prerelease, expected):
         }
 
 
-@pytest.mark.parametrize(
-    "token", (None, "super-token")
-)
+@pytest.mark.parametrize("token", (None, "super-token"))
 def test_should_create_release_using_token_or_netrc(default_gh_client, token):
     default_gh_client.token = token
     default_gh_client.session.auth = None if not token else TokenAuth(token)
@@ -380,7 +378,9 @@ def test_should_create_release_using_token_or_netrc(default_gh_client, token):
                 "Authorization": "Basic "
                 + base64.encodebytes(
                     f"{netrc.login_username}:{netrc.login_password}".encode()
-                ).decode("ascii").strip()
+                )
+                .decode("ascii")
+                .strip()
             }.items() <= m.last_request.headers.items()
         else:
             assert {

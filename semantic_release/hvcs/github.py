@@ -1,17 +1,17 @@
+import glob
 import logging
 import mimetypes
 import os
-from typing import Optional, Union, Tuple
+from typing import Optional, Tuple, Union
 
 from semantic_release.helpers import logged_function
 from semantic_release.hvcs._base import HvcsBase
+from semantic_release.hvcs.token_auth import TokenAuth
 from semantic_release.hvcs.util import (
+    build_requests_session,
     suppress_http_error,
     suppress_not_found,
-    build_requests_session,
 )
-from semantic_release.hvcs.token_auth import TokenAuth
-
 
 logger = logging.getLogger(__name__)
 
@@ -231,7 +231,7 @@ class Github(HvcsBase):
         return True
 
     @logged_function(logger)
-    def upload_dists(self, tag: str, path: str) -> bool:
+    def upload_dists(self, tag: str, dist_globs: Tuple[str, ...]) -> bool:
         """Upload distributions to a release
         :param owner: The owner namespace of the repository
         :param repo_name The repository name
@@ -249,9 +249,10 @@ class Github(HvcsBase):
         # Upload assets
         all_succeeded = True
         for file_path in (
-            os.path.join(path, file)
-            for file in os.listdir(path)
-            if os.path.isfile(os.path.join(path, file))
+            f
+            for path in dist_globs
+            for f in glob.glob(path, recursive=True)
+            if os.path.isfile(f)
         ):
             all_succeeded &= self.upload_asset(release_id, file_path)
 
