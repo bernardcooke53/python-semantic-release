@@ -209,11 +209,11 @@ class Gitea(HvcsBase):
         return True
 
     @logged_function(logger)
-    def upload_dists(self, tag: str, dist_globs: Tuple[str, ...]) -> bool:
+    def upload_dists(self, tag: str, dist_glob: str) -> int:
         """Upload distributions to a release
         :param tag: Tag to upload for
         :param path: Path to the dist directory
-        :return: The status of the request
+        :return: The number of distributions successfully uploaded
         """
 
         # Find the release corresponding to this tag
@@ -223,16 +223,13 @@ class Gitea(HvcsBase):
             return False
 
         # Upload assets
-        all_succeeded = True
+        n_succeeded = 0
         for file_path in (
-            f
-            for path in dist_globs
-            for f in glob.glob(path, recursive=True)
-            if os.path.isfile(f)
+            f for f in glob.glob(dist_glob, recursive=True) if os.path.isfile(f)
         ):
-            all_succeeded &= self.upload_asset(release_id, file_path)
+            n_succeeded += self.upload_asset(release_id, file_path)
 
-        return all_succeeded
+        return n_succeeded
 
     def remote_url(self, use_token: bool = True) -> str:
         if not (self.token and use_token):

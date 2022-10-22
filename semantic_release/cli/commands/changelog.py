@@ -2,6 +2,7 @@ import logging
 import os
 
 import click
+
 # NOTE: use backport with newer API than stdlib
 from importlib_resources import files
 from rich import print as rprint

@@ -35,6 +35,7 @@ def publish(ctx: click.Context) -> None:
 
     latest_tag = tags_and_versions(repo.tags, translator)[0][0]
     if upload_to_release:
-        hvcs_client.upload_dists(tag=latest_tag, dist_globs=dist_glob_patterns)
+        for pattern in dist_glob_patterns:
+            hvcs_client.upload_dists(tag=latest_tag, dist_glob=pattern)
 
     rprint("[green]:sparkles: Done! :sparkles:")

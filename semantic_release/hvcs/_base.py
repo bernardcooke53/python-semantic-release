@@ -53,10 +53,10 @@ class HvcsBase:
     def check_build_status(self, ref: str) -> bool:
         raise NotImplementedError()
 
-    def upload_dists(self, tag: str, dist_globs: Tuple[str, ...]) -> bool:
+    def upload_dists(self, tag: str, dist_glob: str) -> int:
         # release_id is generally just the tag
         # Skip on unsupported HVCS instead of raising error
-        return True
+        return 0
 
     def create_release(
         self, tag: str, changelog: str, prerelease: bool = False
