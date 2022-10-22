@@ -32,29 +32,24 @@ def version(ctx: click.Context, print_only: bool = False) -> None:
     if print_only:
         ctx.exit(0)
 
-    if False:
+    for declaration in ctx.obj.version_declarations:
+        declaration.replace(new_version=v)
 
-        # Following actions are destructive - want them "off" for now
-        for declaration in ctx.obj.version_declarations:
-            declaration.replace(new_version=v)
+    paths = [
+        declaration.path.relative_to(repo.working_dir)
+        for declaration in ctx.obj.version_declarations
+    ]
+    repo.git.add(paths)
+    if assets:
+        repo.git.add(assets)
 
-        paths = [
-            declaration.path.relative_to(repo.working_dir)
-            for declaration in ctx.obj.version_declarations
-        ]
-        repo.git.add(paths)
-        if assets:
-            repo.git.add(assets)
+    repo.git.commit(m=commit_message.format(version=v))
 
-        repo.git.commit(m=commit_message.format(version=v))
+    repo.git.tag("-a", v.as_tag(), m=v.as_tag())
 
-        repo.git.tag("-a", v.as_tag(), m=v.as_tag())
-
-        remote_url = ctx.hvcs_client.remote_url(
-            use_token=not ctx.obj.ignore_token_for_push
-        )
-        # Wrap in GitCommandError handling - remove token
-        repo.git.push(remote_url, repo.active_branch.name)
-        repo.git.push("--tags", remote_url, repo.active_branch.name)
+    remote_url = ctx.hvcs_client.remote_url(use_token=not ctx.obj.ignore_token_for_push)
+    # Wrap in GitCommandError handling - remove token
+    repo.git.push(remote_url, repo.active_branch.name)
+    repo.git.push("--tags", remote_url, repo.active_branch.name)
 
     rprint("[green]:sparkles: Done! :sparkles:")

@@ -141,7 +141,7 @@ class RawConfig(BaseModel):
     tag_format: str = "v{version}"
     commit_parser: str = "angular"
     commit_message: str = COMMIT_MESSAGE
-    build_command: Tuple[str, ...] = tuple(f"{_PY} setup.py sdist bdist_wheel".split())
+    build_command: str = f"{_PY} setup.py sdist bdist_wheel"
     version_toml: Optional[Tuple[str, ...]] = None
     version_variables: Optional[Tuple[str, ...]] = None
     major_on_zero: bool = True
@@ -206,7 +206,7 @@ class RuntimeContext:
     template_environment: Environment
     template_dir: str
     default_changelog_output_file: str
-    build_command: Tuple[str, ...]
+    build_command: str
     twine_settings: TwineSettings
     dist_glob_patterns: Tuple[str, ...]
     upload_to_repository: bool
@@ -249,7 +249,8 @@ class RuntimeContext:
             identity=cls.resolve_from_env(upload_config.identity),
             username=cls.resolve_from_env(upload_config.username),
             password=cls.resolve_from_env(upload_config.password),
-            non_interactive=cls.resolve_from_env(upload_config.non_interactive),
+            non_interactive=cls.resolve_from_env(
+                upload_config.non_interactive),
             comment=upload_config.comment,
             config_file=upload_config.config_file,
             skip_existing=upload_config.skip_existing,
@@ -269,7 +270,8 @@ class RuntimeContext:
     def from_raw_config(cls, raw: RawConfig, repo: Repo) -> RuntimeContext:
         ##
         # branch-specific configuration
-        branch_config = cls.select_branch_options(raw.branches, repo.active_branch.name)
+        branch_config = cls.select_branch_options(
+            raw.branches, repo.active_branch.name)
         # commit_parser
         commit_parser_cls = (
             _known_commit_parsers[raw.commit_parser]

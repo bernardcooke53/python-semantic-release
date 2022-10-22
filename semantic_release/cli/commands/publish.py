@@ -1,4 +1,5 @@
 import logging
+import shlex
 import subprocess
 
 import click
@@ -26,7 +27,7 @@ def publish(ctx: click.Context) -> None:
     twine_settings = ctx.obj.twine_settings
 
     try:
-        subprocess.run(build_command, check=True)
+        subprocess.run(shlex.split(build_command), check=True)
     except subprocess.CalledProcessError as exc:
         ctx.fail(str(exc))
 
