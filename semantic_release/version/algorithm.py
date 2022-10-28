@@ -71,6 +71,7 @@ def _increment_version(
     level_bump: LevelBump,
     prerelease: bool,
     prerelease_token: str,
+    major_on_zero: bool,
 ) -> Version:
     """
     Using the given versions, along with a given `level_bump`, increment to
@@ -86,6 +87,14 @@ def _increment_version(
     `latest_full_version_in_history`, correspondingly, is the latest full release which
     is in this branch's history.
     """
+    if not major_on_zero and latest_version.major == 0:
+        # if we are a 0.x.y release and have set `major_on_zero`,
+        # breaking changes should increment the minor digit.
+        # Correspondingly, we reduce the level that we increment the
+        # version by.
+
+        level_bump = min(level_bump, LevelBump.MINOR)
+
     if prerelease:
         target_final_version = latest_full_version.finalize_version()
         diff_with_last_released_version = (
@@ -128,6 +137,7 @@ def next_version(
     translator: VersionTranslator,
     commit_parser: CommitParser,
     prerelease: bool = False,
+    major_on_zero: bool = True,
 ) -> Optional[Version]:
     # NOTE: if there's no previous versions, and no new commits
     # with an appropriate scope we return None
@@ -211,4 +221,5 @@ def next_version(
         level_bump=level_bump,
         prerelease=prerelease,
         prerelease_token=translator.prerelease_token,
+        major_on_zero=major_on_zero,
     )
