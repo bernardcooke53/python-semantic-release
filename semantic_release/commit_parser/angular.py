@@ -75,6 +75,7 @@ class AngularCommitParser(CommitParser[ParseResult, AngularParserOptions]):
             """,
             flags=re.VERBOSE | re.DOTALL,
         )
+        self._parse_cache: Dict[str, ParsedCommit] = {}
 
     # TODO: maybe cache?
     def parse(self, commit: Commit) -> ParseResult:
