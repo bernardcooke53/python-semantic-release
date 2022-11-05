@@ -210,7 +210,9 @@ def version(
             )
             tmpl = env.from_string(changelog_text).stream()
             if opts.noop:
-                noop_report(f"would have written your changelog to {changelog_file.relative_to(repo.working_dir)}")
+                noop_report(
+                    f"would have written your changelog to {changelog_file.relative_to(repo.working_dir)}"
+                )
                 ctx.exit(0)
             with open(str(changelog_file), "w+", encoding="utf-8") as f:
                 tmpl.dump(f)

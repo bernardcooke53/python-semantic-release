@@ -366,7 +366,7 @@ class RuntimeContext:
             try:
                 path, variable = decl.split(":", maxsplit=1)
                 # VersionDeclarationABC handles path existence check
-                search_text = rf"(?x){variable}\s*(:=|[:=])\s*(?P<quote>['\"]){SEMVER_REGEX.pattern}(?P=quote)"
+                search_text = rf"(?x){variable}\s*(:=|[:=])\s*(?P<quote>['\"])(?P<version>{SEMVER_REGEX.pattern})(?P=quote)"
                 pd = PatternVersionDeclaration(path, search_text)
             except ValueError as exc:
                 log.error("Invalid variable declaration %r", decl, exc_info=True)

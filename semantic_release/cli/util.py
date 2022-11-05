@@ -10,7 +10,7 @@ def rprint(msg: str) -> None:
     rich.print(msg, file=sys.stderr)
 
 
-def noop_report(msg:str)-> None:
+def noop_report(msg: str) -> None:
     """
     Rich-prints a msg with a standard prefix to report when an action is not being
     taken due to a "noop" flag

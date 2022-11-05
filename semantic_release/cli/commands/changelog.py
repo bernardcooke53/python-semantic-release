@@ -50,7 +50,9 @@ def changelog(ctx: click.Context, release_tag: Optional[str] = None) -> None:
         )
         tmpl = env.from_string(changelog_text).stream()
         if runtime.global_cli_options.noop:
-            noop_report(f"would have written your changelog to {changelog_file.relative_to(repo.working_dir)}")
+            noop_report(
+                f"would have written your changelog to {changelog_file.relative_to(repo.working_dir)}"
+            )
             ctx.exit(0)
         with open(str(changelog_file), "w+", encoding="utf-8") as f:
             tmpl.dump(f)
@@ -64,9 +66,7 @@ def changelog(ctx: click.Context, release_tag: Optional[str] = None) -> None:
         recursive_render(template_dir, environment=env, _root_dir=repo.working_dir)
 
     if release_tag and runtime.global_cli_options.noop:
-        noop_report(
-            f"would have posted changelog to the release for tag {release_tag}"
-        )
+        noop_report(f"would have posted changelog to the release for tag {release_tag}")
     elif release_tag:
         changelog = changelog_file.read_text(encoding="utf-8")
         version = translator.from_tag(release_tag)
