@@ -205,14 +205,14 @@ def version(
         if assets:
             repo.git.add(assets)
 
-        if not repo.index.diff("HEAD"):
-            ctx.fail("No files were changed by the version update")
-
-        if commit_author:
-            repo.git.commit(m=commit_message.format(version=v), author=commit_author)
-        else:
-            # Use configured commit author
-            repo.git.commit(m=commit_message.format(version=v))
+        if repo.index.diff("HEAD"):
+            if commit_author:
+                repo.git.commit(
+                    m=commit_message.format(version=v), author=commit_author
+                )
+            else:
+                # Use configured commit author
+                repo.git.commit(m=commit_message.format(version=v))
 
         repo.git.tag("-a", v.as_tag(), m=v.as_tag())
 
@@ -288,23 +288,22 @@ def version(
             repo.git.push(remote_url, active_branch)
             repo.git.push("--tags", remote_url, active_branch)
 
-    release = rh.released[v]
-    release_template = (
-        files("semantic_release")
-        .joinpath("data/templates/release_notes.md.j2")
-        .read_text(encoding="utf-8")
-    )
-    # Use a new, non-configurable environment for release notes - not user-configurable at the moment
-    release_note_environment = environment(template_dir=runtime.template_dir)
-    changelog_context.bind_to_environment(release_note_environment)
-    release_notes = release_note_environment.from_string(release_template).render(
-        version=v, release=release
-    )
     if make_vcs_release and opts.noop:
         noop_report(f"would have created a release for the tag {v.as_tag()!r}")
-        log.info("Release notes: %s", release_notes)
         noop_report(f"would have uploaded the following assets: {runtime.assets}")
     elif make_vcs_release:
+        release = rh.released[v]
+        release_template = (
+            files("semantic_release")
+            .joinpath("data/templates/release_notes.md.j2")
+            .read_text(encoding="utf-8")
+        )
+        # Use a new, non-configurable environment for release notes - not user-configurable at the moment
+        release_note_environment = environment(template_dir=runtime.template_dir)
+        changelog_context.bind_to_environment(release_note_environment)
+        release_notes = release_note_environment.from_string(release_template).render(
+            version=v, release=release
+        )
         try:
             release_id = hvcs_client.create_or_update_release(
                 tag=v.as_tag(),
