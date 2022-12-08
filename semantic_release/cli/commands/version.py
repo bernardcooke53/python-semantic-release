@@ -214,8 +214,6 @@ def version(
                 # Use configured commit author
                 repo.git.commit(m=commit_message.format(version=v))
 
-        repo.git.tag("-a", v.as_tag(), m=v.as_tag())
-
     rh = release_history(repo=repo, translator=translator, commit_parser=parser)
     changelog_context = make_changelog_context(
         hvcs_client=hvcs_client, release_history=rh
@@ -264,9 +262,23 @@ def version(
                     """
                 )
             )
-        if commit_changes:
+        elif commit_changes:
             repo.git.add(updated_paths)
             repo.git.commit("--amend", "--no-edit")
+
+    # Note we have to run the tagging after potentially amending the HEAD commit
+    # Otherwise the hash changes and the tag we just created is orphaned
+    if commit_changes and opts.noop:
+        noop_report(
+            dedent(
+                f"""
+                would have run:
+                    git tag -a {v.as_tag()} -m "{v.as_tag()}"
+                """
+            )
+        )
+    elif commit_changes:
+        repo.git.tag("-a", v.as_tag(), m=v.as_tag())
 
     if push_changes:
         remote_url = runtime.hvcs_client.remote_url(
