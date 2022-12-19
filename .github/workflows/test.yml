@@ -26,7 +26,7 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ needs.beautify.outputs.new_sha }}
-      - name: Fetch master
+      - name: Fetch branch
         run: |
           git fetch --prune origin +refs/heads/${{ github.ref_name }}:refs/remotes/origin/${{ github.ref_name }} && \
             git checkout -f ${{ github.ref_name }}
