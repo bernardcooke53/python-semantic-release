@@ -35,8 +35,14 @@ def changelog(ctx: click.Context, release_tag: str | None = None) -> None:
     env = runtime.template_environment
     template_dir = runtime.template_dir
     changelog_file = runtime.changelog_file
+    changelog_excluded_commit_patterns = runtime.changelog_excluded_commit_patterns
 
-    rh = release_history(repo=repo, translator=translator, commit_parser=parser)
+    rh = release_history(
+        repo=repo,
+        translator=translator,
+        commit_parser=parser,
+        exclude_commit_patterns=changelog_excluded_commit_patterns,
+    )
     changelog_context = make_changelog_context(
         hvcs_client=hvcs_client, release_history=rh
     )

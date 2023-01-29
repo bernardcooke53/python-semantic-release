@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import logging
+import re
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
-from typing import NamedTuple
+from typing import Iterable, Iterator
 
 from git.objects.tag import TagObject
 from git.repo.base import Repo
@@ -25,11 +26,44 @@ from semantic_release.version.version import Version
 log = logging.getLogger(__name__)
 
 
-# Note: generic NamedTuples aren't yet supported by mypy
-# see https://github.com/python/mypy/issues/685
-class ReleaseHistory(NamedTuple):
-    unreleased: dict[str, list[ParseResult]]
-    released: dict[Version, Release]
+class ReleaseHistory:
+    def __init__(
+        self, unreleased: dict[str, list[ParseResult]], released: dict[Version, Release]
+    ) -> None:
+        self.released = released
+        self.unreleased = unreleased
+
+    def __iter__(
+        self,
+    ) -> Iterator[dict[str, list[ParseResult]] | dict[Version, Release]]:
+        """
+        Enables unpacking:
+        >>> rh = ReleaseHistory(...)
+        >>> unreleased, released = rh
+        """
+        yield self.unreleased
+        yield self.released
+
+    def release(
+        self, version: Version, tagger: Actor, committer: Actor, tagged_date: datetime
+    ) -> ReleaseHistory:
+        if version in self.released:
+            raise ValueError(f"{version} has already been released!")
+
+        # return a new instance to avoid potential accidental
+        # mutation
+        return ReleaseHistory(
+            unreleased={},
+            released={
+                version: {
+                    "tagger": tagger,
+                    "committer": committer,
+                    "tagged_date": tagged_date,
+                    "elements": self.unreleased,
+                },
+                **self.released,
+            },
+        )
 
     def __repr__(self) -> str:
         return (
@@ -49,6 +83,7 @@ def release_history(
     repo: Repo,
     translator: VersionTranslator,
     commit_parser: CommitParser[ParseResult, ParserOptions],
+    exclude_commit_patterns: Iterable[re.Pattern[str]] = (),
 ) -> ReleaseHistory:
     all_git_tags_and_versions = tags_and_versions(repo.tags, translator)
     unreleased: dict[str, list[ParseResult]] = defaultdict(list)
@@ -68,25 +103,36 @@ def release_history(
     the_version: Version | None = None
 
     for commit in repo.iter_commits():
+        if any(pat.match(commit.message) for pat in exclude_commit_patterns):
+            log.debug(
+                "Skipping excluded commit %s (%s)",
+                commit.hexsha,
+                commit.message.replace("\n", " ")[:20],
+            )
+            continue
+
         parse_result = commit_parser.parse(commit)
         commit_type = (
             "unknown" if isinstance(parse_result, ParseError) else parse_result.type
         )
+        log.debug("commit has type %s", commit_type)
 
         for tag, version in all_git_tags_and_versions:
             if tag.commit == commit:
                 # we have found the latest commit introduced by this tag
                 # so we create a new Release entry
+                log.debug("found commit %s for tag %s", commit.hexsha, tag.name)
                 is_commit_released = True
                 the_version = version
 
+                # tag.object is a Commit if the tag is lightweight, otherwise
+                # it is a TagObject with addition metadata about the tag
                 if isinstance(tag.object, TagObject):
                     tagger = tag.object.tagger
                     committer = tag.object.tagger.committer()
                     _tz = timezone(timedelta(seconds=tag.object.tagger_tz_offset))
                     tagged_date = datetime.fromtimestamp(tag.object.tagged_date, tz=_tz)
                 else:
-                    # For some reason, sometimes tag.object is a Commit
                     tagger = tag.object.author
                     committer = tag.object.author
                     _tz = timezone(timedelta(seconds=tag.object.author_tz_offset))
@@ -105,11 +151,19 @@ def release_history(
                 break
 
         if not is_commit_released:
+            log.debug("adding commit %s to unreleased commits", commit.hexsha)
             unreleased[commit_type].append(parse_result)
             continue
 
         if the_version is None:
             raise RuntimeError("expected a version to be found")
+
+        log.debug(
+            "adding commit %s with type %s to release section for %s",
+            commit.hexsha,
+            commit_type,
+            the_version,
+        )
         released[the_version]["elements"][commit_type].append(parse_result)
 
     return ReleaseHistory(unreleased=unreleased, released=released)

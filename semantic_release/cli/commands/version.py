@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import logging
 import os
+from datetime import datetime
 from textwrap import dedent, indent
 
 import click
+from git import Actor
 
 # NOTE: use backport with newer API than stdlib
 from importlib_resources import files
@@ -135,6 +137,7 @@ def version(
     )
     hvcs_client = runtime.hvcs_client
     changelog_file = runtime.changelog_file
+    changelog_excluded_commit_patterns = runtime.changelog_excluded_commit_patterns
     env = runtime.template_environment
     template_dir = runtime.template_dir
     assets = runtime.assets
@@ -215,42 +218,37 @@ def version(
             new_content = declaration.replace(new_version=v)
             declaration.path.write_text(new_content)
 
+    all_paths_to_add = paths + (assets if assets else [])
+
     if commit_changes and opts.noop:
-        all_paths_to_add = paths + (assets if assets else [])
-        # Indents the newlines so that terminal formatting is happy - note the
-        # git commit line of the output is 24 spaces indented too
-        # Only this message needs such special handling because of the newlines
-        # that might be in a commit message between the subject and body
-        indented_commit_message = commit_message.format(version=v).replace(
-            "\n\n", "\n\n" + " " * 24
-        )
         noop_report(
             indent(
                 dedent(
                     f"""
                     would have run:
                         git add {" ".join(all_paths_to_add)}
-                        git commit -m "{indented_commit_message}"
                     """
                 ),
                 prefix=" " * 4,
             )
         )
     elif commit_changes:
-        repo.git.add(paths)
-        if assets:
-            repo.git.add(assets)
+        repo.git.add(all_paths_to_add)
 
-        if repo.index.diff("HEAD"):
-            if commit_author:
-                repo.git.commit(
-                    m=commit_message.format(version=v), author=commit_author
-                )
-            else:
-                # Use configured commit author
-                repo.git.commit(m=commit_message.format(version=v))
+    rh = release_history(
+        repo=repo,
+        translator=translator,
+        commit_parser=parser,
+        exclude_commit_patterns=changelog_excluded_commit_patterns,
+    )
 
-    rh = release_history(repo=repo, translator=translator, commit_parser=parser)
+    commit_date = datetime.now()
+    rh = rh.release(
+        v,
+        tagger=commit_author,
+        committer=commit_author,
+        tagged_date=commit_date,
+    )
     changelog_context = make_changelog_context(
         hvcs_client=hvcs_client, release_history=rh
     )
@@ -300,20 +298,36 @@ def version(
             )
         elif commit_changes:
             repo.git.add(updated_paths)
-            repo.git.commit("--amend", "--no-edit")
 
     # Note we have to run the tagging after potentially amending the HEAD commit
     # Otherwise the hash changes and the tag we just created is orphaned
     if commit_changes and opts.noop:
+        # Indents the newlines so that terminal formatting is happy - note the
+        # git commit line of the output is 24 spaces indented too
+        # Only this message needs such special handling because of the newlines
+        # that might be in a commit message between the subject and body
+        indented_commit_message = commit_message.format(version=v).replace(
+            "\n\n", "\n\n" + " " * 20
+        )
         noop_report(
             dedent(
                 f"""
                 would have run:
+                    git commit -m "{indented_commit_message}"
                     git tag -a {v.as_tag()} -m "{v.as_tag()}"
                 """
             )
         )
     elif commit_changes:
+        # If we have made any modifications to the source code of the Git repo,
+        # make a release commit. Otherwise we just tag HEAD as it was in the
+        # repo.
+        if repo.index.diff("HEAD"):
+            repo.git.commit(
+                m=commit_message.format(version=v),
+                author=f"{commit_author.name} <{commit_author.email}>",
+                date=int(commit_date.timestamp()),
+            )
         repo.git.tag("-a", v.as_tag(), m=v.as_tag())
 
     if push_changes:
