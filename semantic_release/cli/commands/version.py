@@ -257,7 +257,6 @@ def version(
     changelog_context.bind_to_environment(env)
 
     if update_changelog:
-
         if not os.path.exists(template_dir):
             log.info(
                 "Path %r not found, using default changelog template", template_dir

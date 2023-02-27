@@ -48,11 +48,11 @@ def _bfs_for_latest_version_in_history(
     `merge_base`'s parents' history. If no commits in the history correspond
     to a released version, return None
     """
+
     # Step 3. Latest full release version within the history of the current branch
     # Breadth-first search the merge-base and its parent commits for one which matches
     # the tag of the latest full release tag in history
     def bfs(visited: set[Commit], q: "Queue[Commit]") -> Version | None:
-
         if q.empty():
             log.debug("queue is empty, returning none")
             return None
@@ -285,7 +285,11 @@ def next_version(
     # been added since then.
     parsed_levels: set[LevelBump] = set()
     latest_version = latest_full_version_in_history or Version(
-        0, 0, 0, prerelease_token=translator.prerelease_token
+        0,
+        0,
+        0,
+        prerelease_token=translator.prerelease_token,
+        tag_format=translator.tag_format,
     )
 
     # N.B. these should be sorted so long as we iterate the commits in reverse order
@@ -353,7 +357,13 @@ def next_version(
         latest_full_version=latest_full_release_version,
         latest_full_version_in_history=(
             latest_full_version_in_history
-            or Version.parse("0.0.0", prerelease_token=translator.prerelease_token)
+            or Version(
+                0,
+                0,
+                0,
+                prerelease_token=translator.prerelease_token,
+                tag_format=translator.tag_format,
+            )
         ),
         level_bump=level_bump,
         prerelease=prerelease,
